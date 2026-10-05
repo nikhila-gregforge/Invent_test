@@ -1,12 +1,14 @@
 """Read-only AI Inventory validation workspace. Run: python app.py"""
 import os
+import json
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, Forbidden
 import inventory as config
 from inventory.ingestion import ImportFailure, SheetSelectionRequired
 from inventory.storage import Store
-from inventory.exports import select_records, field_summary, export_report
+from inventory.exports import select_records, export_report
+from inventory.validation import catalogue
 
 ROOT=Path(__file__).resolve().parent
 
@@ -35,17 +37,36 @@ def create_app(data_dir=None):
     @app.get('/api/runs')
     def runs(): return jsonify(runs=store.runs(),max_bytes=config.MAX_BYTES,max_rows=config.MAX_ROWS)
 
-    @app.post('/api/runs')
-    def upload():
+    @app.get('/api/rules')
+    def rules():
+        return jsonify(rules_version=config.RULES_VERSION,fields=catalogue())
+
+    def uploaded_file():
         if request.headers.get('X-Requested-With')!='AIInventory':
-            return jsonify(error='Upload requests must originate from this application.'),403
+            raise Forbidden('Upload requests must originate from this application.')
         origin=request.headers.get('Origin')
         if origin and origin!=request.host_url.rstrip('/'):
-            return jsonify(error='Cross-origin uploads are not allowed.'),403
+            raise Forbidden('Cross-origin uploads are not allowed.')
         file=request.files.get('file')
         if file is None or not file.filename: raise ValueError('Choose a CSV or XLSX file.')
-        data=file.read(config.MAX_BYTES+1)
-        identifier=store.stage(data,file.filename,request.form.get('sheet') or None)
+        return file.read(config.MAX_BYTES+1),file.filename,request.form.get('sheet') or None
+
+    @app.post('/api/preview')
+    def preview():
+        data,filename,sheet=uploaded_file()
+        return jsonify(store.preview(data,filename,sheet))
+
+    @app.post('/api/runs')
+    def upload():
+        data,filename,sheet=uploaded_file()
+        try:
+            mapping=json.loads(request.form['mapping'])
+        except (KeyError,ValueError):
+            raise ValueError('Review and confirm the column mapping before validating.')
+        if not request.form.get('file_hash') or not request.form.get('rules_version'):
+            raise ValueError('Upload the file for preview before confirming its mapping.')
+        identifier=store.stage(data,filename,mapping,sheet,
+            expected_hash=request.form['file_hash'],rules_version=request.form['rules_version'])
         return jsonify(id=identifier),201
 
     @app.get('/api/runs/<identifier>')
@@ -58,10 +79,8 @@ def create_app(data_dir=None):
         except ValueError: raise ValueError('Invalid pagination.')
         pages=max(1,(len(records)+size-1)//size)
         page=min(page,pages)
-        summary=field_summary(snapshot,records)
-        return jsonify(run=snapshot['run'],fields=summary,matched=len(records),page=page,pages=pages,size=size,
-            findings=sum(len(r['findings']) for r in records),
-            rules=sorted({(f['rule_id'],f['title']) for r in snapshot['records'] for f in r['findings']}),
+        return jsonify(run=snapshot['run'],fields=snapshot['fields'],matched=len(records),page=page,pages=pages,size=size,
+            missing_required=snapshot.get('missing_required',[]),
             records=[{k:r[k] for k in ['key','source_row','response_id','name','owner','status','errors','warnings','affected_fields']}
                      for r in records[(page-1)*size:page*size]])
 
@@ -69,7 +88,7 @@ def create_app(data_dir=None):
     def record(identifier,key):
         snapshot=store.snapshot(identifier)
         if key<0 or key>=len(snapshot['records']): raise KeyError('Record not found.')
-        return jsonify(record=snapshot['records'][key],fields=snapshot['fields'])
+        return jsonify(record=snapshot['records'][key],fields=snapshot['fields'],run=snapshot['run'])
 
     @app.get('/api/runs/<identifier>/export')
     def export(identifier):

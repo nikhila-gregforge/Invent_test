@@ -90,14 +90,13 @@ def impact(value):
     return result
 
 
-def hitl(value, legacy=False):
+def hitl(value):
     s = whitespace(value)
     override = 'Unknown'
     # Override is extracted only as a named pair, never inferred from oversight.
     pair = re.search(r'\s*[,;]\s*Override(?: capability)?\s*[:= ]\s*(Yes|No|Unknown)\s*$', s, re.I)
     if pair:
-        if not legacy:
-            override = pair[1].title()
+        override = pair[1].title()
         s = s[:pair.start()]
     elif re.search(r'\boverride\b', s, re.I):
         raise ValueError('Use a named Override: Yes, No, or Unknown value.')
@@ -105,11 +104,7 @@ def hitl(value, legacy=False):
     return oversight, override, detail
 
 
-def raw_inputs(row):
-    return {'response_id':text(row['values']['ID']), **{key:row['values'][q] for q,key in config.FIELDS.items()}}
-
-
-def normalize(inputs, legacy=False, formulas=()):
+def normalize(inputs, formulas=()):
     product, problems = {}, []
     details = {}
     for field in config.FIELDS.values():
@@ -126,15 +121,10 @@ def normalize(inputs, legacy=False, formulas=()):
                 product[field] = impact(value) if text(value) else None
             elif field == 'human_oversight':
                 if text(value):
-                    product[field],product['override_capability'],detail = hitl(value,legacy)
+                    product[field],product['override_capability'],detail = hitl(value)
                     if detail and product[field] == 'Other': details[field] = detail
                 else:
                     product['override_capability'] = 'Unknown'
-                if 'override_capability' in inputs:
-                    override = text(inputs['override_capability']).title()
-                    if override not in {'Yes','No','Unknown'}:
-                        raise ValueError('Override capability must be Yes, No, or Unknown.')
-                    product['override_capability'] = override
                 if product[field] == 'Other' and not details.get(field):
                     raise ValueError('Other requires an explanation.')
             elif field in config.OPTIONS:

@@ -1,8 +1,8 @@
-"""Small, explicit MVP dictionaries; no inferred source options."""
+"""Inventory contract and optional header suggestions; upload names do not set policy."""
 import os
 from pathlib import Path
 
-RULES_VERSION = '2.0'
+RULES_VERSION = '3.0'
 MAX_BYTES = int(os.getenv('AI_INVENTORY_MAX_BYTES', 10 * 1024 * 1024))
 MAX_ROWS = int(os.getenv('AI_INVENTORY_MAX_ROWS', 10000))
 DATA_DIR = Path(os.getenv('AI_INVENTORY_DATA_DIR', './data'))
@@ -57,7 +57,7 @@ LABELS = dict(zip(FIELDS.values(), [
     'Go-Live Date', 'Line of Business', 'State', 'Risk Tier', 'Human-in-the-Loop',
     'Submitter Name', 'Date Submitted']))
 LABELS['override_capability'] = 'Override capability'
-LABELS['response_id'] = 'Response ID'
+LABELS['response_id'] = 'Source record ID'
 MULTI = {'business_functions', 'ai_types', 'data_types', 'data_environments', 'lines_of_business', 'states'}
 COUNTS = {'ml_dl_count', 'llm_count'}
 DATES = {'go_live_date', 'submitted_date'}
@@ -88,81 +88,77 @@ ALIASES = {
   'External to Centene in Vendor cloud environment (e.g., Harvey AI runs in vendor AWS account)':'External to Centene in vendor cloud environment'},
  'human_oversight': {'Yes—at all stages':'Yes','Yes—at final stage':'Partially','Conditional':'Partially','Yes (all stages)':'Yes','Yes (final decision only)':'Partially','Conditional (exception)':'Partially','No (fully autonomous)':'No'},
 }
-WARNING_RULES = {'APP-01','EMAIL-02','VENDOR-02','COUNT-04','COUNT-05','COUNT-06','DATE-03','HITL-02'}
-RULE_SEVERITIES = {r: ('WARNING' if r in WARNING_RULES else 'ERROR') for r in [
- 'ID-01','ID-02','REQ-01','ENUM-01','TEXT-01','APP-01','EMAIL-01','EMAIL-02','VENDOR-01','VENDOR-02',
- *[f'COUNT-0{i}' for i in range(1,7)],'DATE-01','DATE-02','DATE-03','SCOPE-01','SCOPE-02','IMPACT-01','RISK-01','HITL-01','HITL-02',
- ]}
-# The same rule can accept explicitly unknown information with a warning.
-UNKNOWN_SEVERITIES = {rule:'WARNING' for rule in ['ENUM-01','IMPACT-01','RISK-01','HITL-01']}
-
-# Raw agent exports have their own contract; no organization-to-purpose inference.
-AGENT_HEADERS = {
-    'Name':'system_name', 'Title ID':'response_id', 'Status':'deployment_status',
-    'Date created':'created_date', 'Last Modified':'modified_date',
-    'Publisher':'technical_owner_email', 'Description':'business_purpose',
-    'Instructions':'instructions', 'Platform':'platform', 'Owner':'business_owner_email',
-    'Market Name':'market', 'Line of Business Name':'organization_lob',
-    'Department Name':'department', 'Job Title':'job_title',
-    'Business Function':'business_functions',
-    'Impact from AI (Patient/Member, Regulatory, Financial)':'impact',
-    'Vendor Owner':'vendor_owner', 'Type(s) of AI used':'ai_types',
-    'ML/DL Models Count':'ml_dl_count', 'LLM Count':'llm_count',
-    'Data input to or processed by AI tool':'data_types', 'Data Environment':'data_environments',
-    'Deployment Environment':'deployment_environment', 'State':'states',
-    'Risk Tier':'risk_tier', 'Human-in-the-Loop & Override Capability':'human_oversight',
-}
-AGENT_OPTIONAL = {'Source of AI System':'ai_source','Go-Live Date':'go_live_date','LOB':'lines_of_business'}
-AGENT_LABELS = {field:header for header,field in AGENT_HEADERS.items()}
-AGENT_LABELS.update({'ai_source':'Source of AI System','go_live_date':'Go-Live Date','lines_of_business':'Usage line of business'})
+# Header aliases only suggest choices. Every upload requires a confirmed mapping.
 ALIASES['ai_types']['Generative AI'] = 'Generative AI (GenAI)'
-RULE_SEVERITIES.update({'REQ-02':'ERROR','NAME-01':'WARNING','GAP-01':'WARNING','META-01':'WARNING','DATE-04':'ERROR','LENGTH-01':'WARNING','FORMULA-01':'ERROR'})
-RULE_TITLES = {
-    'ID-01':'Missing or duplicate record ID','ID-02':'Duplicate application ID',
-    'REQ-01':'Required value missing','REQ-02':'Placeholder value','TEXT-01':'Test or generic text',
-    'ENUM-01':'Unsupported category','APP-01':'Application ID unavailable',
-    'EMAIL-01':'Invalid owner email','EMAIL-02':'External owner email',
-    'VENDOR-01':'Vendor contact required','VENDOR-02':'Vendor applicability unresolved',
-    'COUNT-01':'Invalid model count','COUNT-02':'LLM count required','COUNT-03':'ML/DL count required',
-    'COUNT-04':'Model count unresolved','COUNT-05':'Count and technology mismatch','COUNT-06':'Unknown model count',
-    'DATE-01':'Invalid or missing date','DATE-02':'Active system needs go-live date',
-    'DATE-03':'Future planned date','DATE-04':'Source date ordering',
-    'SCOPE-01':'Conflicting selections','SCOPE-02':'Medicaid jurisdiction missing',
-    'IMPACT-01':'Impact incomplete','RISK-01':'Risk tier unresolved','HITL-01':'Oversight unresolved',
-    'HITL-02':'Override unresolved','NAME-01':'Repeated system name','GAP-01':'Source mapping unavailable',
-    'META-01':'Organization metadata missing','LENGTH-01':'Possible truncated instructions','FORMULA-01':'Formula in source',
+INVENTORY_FIELDS = [*FIELDS.values(), 'response_id']
+SOURCE_ALIASES = {
+    'response_id':['ID','Title ID','Record ID'],
+    'application_id':['Application ID','System ID'],
+    'system_name':['Name','System name','AI system name','AI name'],
+    'business_purpose':['Description','Purpose','Intended use'],
+    'business_functions':['Business Function'],
+    'ai_types':['Type(s) of AI used','AI technology'],
+    'data_types':['Data input to or processed by AI tool'],
+    'deployment_status':['Status'],
+    'lines_of_business':['LOB','Usage line of business'],
+    'states':['State'],
+    'human_oversight':['Human-in-the-Loop & Override Capability'],
 }
+# Publisher, Owner, creation dates and organization metadata are intentionally not
+# treated as accountable owners, go-live dates or usage scope.
 PLACEHOLDERS = {'','n/a','na','none','null','unknown','not available','not provided','no data provided','tbd'}
+FIELD_DESCRIPTIONS = {
+    'application_id':'The identifier of the application or AI system. Not Available and Unknown require review.',
+    'system_name':'The actual name of the AI system or solution.',
+    'business_purpose':'What the system does, who it serves, and why it is used.',
+    'business_owner_email':'The person accountable for business use: a name (with role or department if useful) or one valid email.',
+    'technical_owner_email':'The person accountable for technical operation: a name (with role or department if useful) or one valid email.',
+    'vendor_owner':'The accountable vendor contact, when the acquisition involves a vendor.',
+    'ai_source':'How the system was acquired or developed. A platform name does not establish this.',
+    'ai_types':'The AI technologies the system actually uses.',
+    'llm_count':'The number of large language models used. A model name or response mode is not a count.',
+    'ml_dl_count':'The number of machine-learning or deep-learning models, excluding large language models.',
+    'impact':'State Member, Regulatory and Financial impact separately, using Yes, No or Unknown for each.',
+    'deployment_status':'The current inventory lifecycle stage. Available alone does not establish that the system is Active.',
+    'go_live_date':'The actual go-live date. Do not substitute a creation or last-modified date.',
+    'lines_of_business':'Lines of business where this system is used. An owner’s organizational LOB may mean something different.',
+    'states':'The jurisdictions where the system is used. An owner’s market is not automatically the usage jurisdiction.',
+    'submitted_date':'The date this inventory information was submitted.',
+    'submitter_name':'The name of the person supplying the inventory information.',
+    'response_id':'Optional source record identifier for tracing a row back to the uploaded file. Source row numbers are always retained.',
+}
+FIELD_EXAMPLES = {
+    'application_id':'APP-001', 'system_name':'Claims reference assistant',
+    'business_purpose':'Helps claims staff find approved internal guidance.',
+    'business_owner_email':'Alex Smith, Operations',
+    'technical_owner_email':'taylor.jones@centene.com',
+    'vendor_owner':'Example Vendor — Alex Smith',
+    'llm_count':'0, 1, 2 or Unknown', 'ml_dl_count':'0, 1, 2 or Unknown',
+    'impact':'Member: No; Regulatory: No; Financial: Yes',
+    'go_live_date':'2026-01-02', 'submitted_date':'2026-09-01',
+    'submitter_name':'Alex Smith', 'response_id':'001',
+}
 
-def field_rules(field, profile):
-    rules = {
-        'response_id':'A meaningful record ID is required. Repeated IDs flag every affected record.',
-        'application_id':'Required. Not Available and Unknown require review. Other IDs must be unique in the upload.',
-        'system_name':'Required. Reject test-only, numeric, and generic names. Repeated names require review.',
-        'business_purpose':'Required. Reject test-only and placeholder descriptions; legitimate descriptions of testing are allowed.',
-        'business_owner_email':'Required. Forms: exactly one valid email; external domains require review. Agent export: a meaningful Owner value.',
-        'technical_owner_email':'Required. Forms: exactly one valid email; external domains require review. Agent export: a meaningful Publisher value.',
-        'vendor_owner':'Vendor-based acquisition requires a meaningful contact. Missing acquisition metadata leaves applicability unresolved.',
-        'ml_dl_count':'Nonnegative whole number. Explicit ML/DL requires a positive count. Blank is not zero; Unknown requires review.',
-        'llm_count':'Nonnegative whole number. Explicit LLM requires a positive count. Names and response modes are not counts.',
-        'impact':'Member, Regulatory, and Financial must each appear exactly once as Yes, No, or Unknown. Unknown requires review.',
-        'go_live_date':'A valid date. Active systems require a nonfuture date. Never substitute the creation date. Missing agent-export metadata requires review.',
-        'submitted_date':'Required valid date, no later than the validation date.',
-        'submitter_name':'Required meaningful name; placeholder values fail.',
-        'created_date':'Required ISO date/timestamp, no later than the validation date.',
-        'modified_date':'Required ISO date/timestamp, no earlier than creation and no later than the validation date.',
-        'instructions':'Missing instructions require review. Exactly 8,000 characters flags possible truncation, not a confirmed error.',
-        'platform':'A meaningful source platform is required; it does not establish acquisition type.',
-    }
-    if field in rules: return rules[field]
-    if field in {'market','organization_lob','department','job_title'}:
-        return 'Missing or placeholder organization metadata requires review. It is not used to infer system purpose, function, or usage geography.'
-    if field in OPTIONS:
-        value='Use configured categories: '+', '.join(OPTIONS[field])+'.'
-        if 'Other' in OPTIONS[field]: value+=' Other requires a description.'
-        if field in {'risk_tier','human_oversight','ai_types','ai_source'}: value+=' Unknown requires review.'
-        if field in {'states','lines_of_business'}: value+=' None must stand alone; All States must stand alone. Medicaid requires a jurisdiction.'
-        if field=='deployment_status': value+=' Available in an agent export requires a lifecycle mapping; it is not automatically Active.'
-        if profile=='agents' and field in {'ai_source','lines_of_business'}: value+=' Missing source metadata requires review; no inferred value is substituted.'
-        return value
-    return 'Retained source metadata; no validation rule is configured.'
+def field_definition(field):
+    if field in {'business_owner_email','technical_owner_email'}:
+        format_hint='A person’s name, optionally with role or department, or exactly one valid email address.'
+    elif field == 'application_id':
+        format_hint='The application ID. Not Available or Unknown is accepted with a warning.'
+    elif field == 'response_id':
+        format_hint='Optional. A supplied identifier must be unique within the file; leading zeros are preserved.'
+    elif field in COUNTS:
+        format_hint='A whole number of 0 or greater. Blank means not supplied; Unknown requires review. A declared model type requires a positive count.'
+    elif field in DATES:
+        format_hint='YYYY-MM-DD, M/D/YYYY, M/D/YY, or an Excel date cell. Slash dates use month/day order.'
+    elif field == 'impact':
+        format_hint='Member: Yes/No/Unknown; Regulatory: Yes/No/Unknown; Financial: Yes/No/Unknown.'
+    elif field in MULTI:
+        format_hint='Select supported values. Separate multiple selections with semicolons. Use Other: description when applicable.'
+    elif field in OPTIONS:
+        format_hint='One supported value. Use Other: description when applicable.'
+    else:
+        format_hint='A meaningful value, not a placeholder.'
+    return {'id':field,'label':LABELS[field],'required':field in REQUIRED,
+            'description':FIELD_DESCRIPTIONS.get(field,'Identify the '+LABELS[field].lower()+' for this system.'),
+            'format':format_hint,'example':FIELD_EXAMPLES.get(field,''),
+            'options':OPTIONS.get(field,[]),'aliases':ALIASES.get(field,{})}

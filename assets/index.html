@@ -3,113 +3,76 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark"><title>AI Inventory · Centene</title>
-  <link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/style.css?v=record-view">
-  <script src="/assets/app.js?v=record-view" defer></script>
+  <link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/style.css?v=mapping-3">
+  <script src="/assets/app.js?v=mapping-3" defer></script>
 </head>
 <body>
-<a class="skip-link" href="#main">Skip to results</a>
-<aside class="sidebar">
-  <div class="brand"><div class="logo"><img src="/assets/centene-logo.jpg" alt="Centene" width="142" height="35"></div><span>AI Governance Team</span></div>
-  <div class="workspace-name"><span class="workspace-icon" aria-hidden="true">▦</span> AI Inventory</div>
-  <button class="primary upload-trigger" type="button"><span aria-hidden="true">＋</span> Upload file</button>
-  <div class="history-heading">VALIDATION HISTORY <span id="run-count">0</span></div>
-  <nav id="history" aria-label="Validation history"></nav>
-  <p id="history-empty" class="muted small">Your validation runs will appear here.</p>
-  <div class="sidebar-bottom"><span class="status-dot"></span> Rules <span id="rule-version">2.0</span></div>
-</aside>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="app-header">
+  <div class="brand"><img src="/assets/centene-logo.jpg" alt="Centene" width="142" height="35"><div><strong>AI Governance Team</strong><span>Inventory review</span></div></div>
+  <nav aria-label="Main navigation"><button id="home-button" class="quiet" type="button">Reviews</button><button class="primary upload-trigger" type="button">Upload file</button></nav>
+</header>
 <main id="main" tabindex="-1">
-  <div id="notice" role="alert" hidden></div>
-  <section id="empty" class="empty-state" hidden>
-    <span class="empty-icon" aria-hidden="true">▤</span>
-    <h1>Validate an inventory file</h1>
-    <p class="muted">Forms disclosure or agent export · CSV / XLSX</p>
-    <button class="primary upload-trigger" type="button">Upload file</button>
+  <div id="notice" class="notice" role="alert" hidden></div>
+  <section id="home-view" aria-labelledby="home-title">
+    <div class="page-heading"><h1 id="home-title">Inventory reviews</h1></div>
+    <p id="home-loading" class="muted" role="status">Loading reviews…</p>
+    <div id="home-empty" class="empty-state" hidden><h2>No reviews yet</h2><p>Upload an inventory file to start a review.</p></div>
+    <div id="history-wrap" class="table-scroll" hidden><table class="history-table"><thead><tr><th>File</th><th>Records</th><th>Results</th><th>Reviewed</th></tr></thead><tbody id="history"></tbody></table></div>
   </section>
-  <section id="workspace" hidden>
-    <header class="page-heading">
-      <div><div class="eyebrow">VALIDATION REVIEW</div><h1 id="filename"></h1><p id="run-meta" class="muted small"></p></div>
-      <details id="export-menu" class="export-menu"><summary class="button">Download report <span aria-hidden="true">⌄</span></summary>
-        <div class="menu-content">
-          <a data-export="issues">Issues for matching records</a>
-          <a data-export="records">Matching records</a>
-          <a data-export="fields">Field summary for matching records</a>
-          <hr><a data-export="issues" data-scope="all">All issues in this file</a>
-          <a data-export="records" data-scope="all">All records in this file</a>
-          <span class="muted small">CSV reports · Original values included</span>
-        </div>
-      </details>
-    </header>
-    <section class="metrics" aria-label="Whole-file record totals">
-      <button data-status="all" class="metric"><span>Total records</span><strong id="total-count">0</strong><small>Entire file</small></button>
-      <button data-status="Passed" class="metric passed"><span><i></i> Passed</span><strong id="passed-count">0</strong><small>All applicable checks passed</small></button>
-      <button data-status="Needs review" class="metric review"><span><i></i> Needs review</span><strong id="review-count">0</strong><small>Warnings or unresolved metadata</small></button>
-      <button data-status="Failed" class="metric failed"><span><i></i> Failed</span><strong id="failed-count">0</strong><small>One or more errors</small></button>
+  <section id="mapping-view" aria-labelledby="mapping-title" hidden>
+    <div class="step-label">UPLOAD <span>→</span> <strong>MAP COLUMNS</strong> <span>→</span> REVIEW</div>
+    <div class="page-heading"><div><h1 id="mapping-title" tabindex="-1">Map inventory fields</h1><p id="mapping-file" class="muted"></p></div><button id="mapping-rules" class="quiet" type="button">View validation rules</button></div>
+    <p id="mapping-origin" class="muted small"></p>
+    <div class="table-scroll"><table class="mapping-table"><thead><tr><th>Inventory field</th><th>Column in your file</th><th>Sample values</th></tr></thead><tbody id="mapping-rows"></tbody></table></div>
+    <details id="unmapped-details" class="source-extras"><summary id="unmapped-summary"></summary><p id="unmapped-columns" class="muted small"></p></details>
+    <div class="mapping-footer"><div><p id="mapping-progress" role="status"></p><p id="mapping-missing" class="small warning-text" hidden></p></div><div class="actions"><button id="mapping-fill" class="quiet" type="button">Mark remaining as not provided</button><button id="mapping-cancel" type="button">Cancel</button><button id="mapping-submit" class="primary" type="button" disabled>Confirm mapping &amp; validate</button></div></div>
+  </section>
+  <section id="review-view" aria-labelledby="filename" hidden>
+    <div class="page-heading"><div><h1 id="filename" tabindex="-1"></h1><p id="run-meta" class="muted small"></p></div><div class="actions"><button id="review-rules" class="quiet" type="button">View validation rules</button><button id="download-open" type="button">Download report</button></div></div>
+    <div id="summary" class="summary" aria-label="Results for the entire file"></div>
+    <p id="missing-columns" class="file-notice" hidden></p>
+    <section class="filters" aria-label="Filter records">
+      <label class="search-label">Search<input id="search" type="search" placeholder="Name, ID or owner" autocomplete="off"></label>
+      <label>Status<select id="status"><option value="attention">Needs attention</option><option value="all">All records</option><option value="Failed">Errors</option><option value="Needs review">Warnings</option><option value="Passed">Passed</option></select></label>
+      <label>Issues in field<select id="field"><option value="">All fields</option></select></label>
+      <button id="clear-filters" class="quiet" type="button">Clear filters</button>
     </section>
-    <div class="tabs" role="tablist" aria-label="Validation views">
-      <button role="tab" id="tab-records" aria-controls="panel-records" aria-selected="true" data-tab="records">Records</button>
-      <button role="tab" id="tab-fields" aria-controls="panel-fields" aria-selected="false" data-tab="fields" tabindex="-1">Fields</button>
-      <button role="tab" id="tab-rules" aria-controls="panel-rules" aria-selected="false" data-tab="rules" tabindex="-1">Rules</button>
-    </div>
-    <section class="filter-bar" aria-label="Filter records">
-      <div class="filter-grid">
-        <label class="search-label">Search<input id="search" type="search" placeholder="Name, record ID or owner" autocomplete="off"></label>
-        <label>Status<select id="status"><option value="attention">Needs attention</option><option value="all">All records</option><option>Failed</option><option>Needs review</option><option>Passed</option></select></label>
-        <label>Affected field<select id="field"><option value="">All fields</option></select></label>
-        <label>Rule<select id="rule"><option value="">All rules</option></select></label>
-        <label>Severity<select id="severity"><option value="">All severities</option><option value="ERROR">Error</option><option value="WARNING">Warning</option></select></label>
-      </div>
-      <div class="filter-bottom"><details class="value-filter"><summary>Filter by column value</summary><div class="value-controls">
-        <label>Column<select id="column"><option value="">Choose a column</option></select></label>
-        <label>Value contains<input id="value" placeholder="Search submitted values" disabled></label>
-        <label class="checkbox-label"><input id="blank" type="checkbox" disabled> Blank only</label>
-      </div></details><button id="clear-filters" class="text-button" type="button">Clear filters</button></div>
-      <div id="filter-chips" class="chips" aria-label="Active filters"></div>
-    </section>
-    <div class="results-heading"><p id="match-count" role="status" aria-live="polite"></p><span id="loading" class="muted small" hidden>Loading…</span></div>
-    <section id="panel-records" role="tabpanel" aria-labelledby="tab-records">
-      <details class="overview" open><summary>Fields needing attention <span class="muted small">Matching records</span></summary><div id="chart" class="chart"></div><p id="chart-empty" class="muted small" hidden>No field issues in this selection.</p></details>
-      <div class="table-toolbar"><span class="small muted">Select a record to inspect its findings</span><label>Sort by <select id="sort"><option value="issues">Most issues</option><option value="name">System name</option><option value="id">Record ID</option><option value="source_row">Source row</option></select></label></div>
-      <div class="table-scroll"><table class="records-table"><thead><tr><th>Status</th><th>System / record ID</th><th>Owner</th><th>Affected fields</th><th>Issues</th><th>Source row</th></tr></thead><tbody id="records"></tbody></table></div>
-      <div id="no-results" class="no-results" hidden><strong>No matching records</strong><p class="muted">Adjust the filters to see more records.</p><button id="reset-empty" type="button">Show all records</button></div>
-      <footer class="pagination"><label>Rows per page <select id="page-size"><option>25</option><option>50</option><option>100</option></select></label><div><span id="page-info"></span><button id="previous" aria-label="Previous page">←</button><button id="next" aria-label="Next page">→</button></div></footer>
-    </section>
-    <section id="panel-fields" role="tabpanel" aria-labelledby="tab-fields" hidden>
-      <p class="small muted">Counts reflect matching records. Error and warning counts can overlap.</p>
-      <div class="table-scroll"><table><thead><tr><th>Field</th><th>Affected records</th><th>Errors</th><th>Warnings</th><th>Blank</th><th>Distinct</th><th>Common values</th></tr></thead><tbody id="fields"></tbody></table></div>
-    </section>
-    <section id="panel-rules" role="tabpanel" aria-labelledby="tab-rules" hidden>
-      <p id="rules-meta" class="small muted"></p><div id="rules-list" class="rules-list"></div>
-    </section>
+    <p id="results-loading" class="muted small" role="status" hidden>Loading records…</p>
+    <div class="table-scroll"><table class="records-table"><thead><tr><th>Record</th><th>Status</th><th>Issues</th><th>Affected fields</th></tr></thead><tbody id="records"></tbody></table></div>
+    <div id="no-results" class="empty-state" hidden><h2>No records in this view</h2><button id="show-all" type="button">Show all records</button></div>
+    <footer class="pagination"><span id="record-count" role="status"></span><div><span id="page-info"></span><button id="previous" type="button" aria-label="Previous page">←</button><button id="next" type="button" aria-label="Next page">→</button></div></footer>
   </section>
   <section id="record-view" aria-labelledby="record-title" hidden>
-    <button id="back-to-results" class="text-button record-back" type="button">← Back to results</button>
-    <header class="record-heading">
-      <div class="eyebrow">RECORD DETAILS</div>
-      <p id="record-file" class="muted small"></p>
-      <h1 id="record-title" tabindex="-1"></h1>
-      <p id="record-meta" class="muted small"></p>
-      <div id="record-status" role="status"></div>
-    </header>
+    <button id="back-to-results" class="quiet back" type="button">← Back to results</button>
+    <div class="page-heading"><div><p id="record-file" class="muted small"></p><h1 id="record-title" tabindex="-1">Record details</h1><p id="record-meta" class="muted small"></p><div id="record-status" class="record-status" role="status"></div></div><button id="record-rules" class="quiet" type="button">View validation rules</button></div>
     <p id="record-loading" class="muted" role="status" hidden>Loading record…</p>
     <div id="record-error" hidden><p id="record-error-message" class="error-text" role="alert"></p><button id="record-retry" type="button">Retry</button></div>
     <div id="record-content" hidden>
-      <nav id="record-findings" class="record-findings" aria-label="Fields needing attention"></nav>
-      <h2 class="record-fields-heading">Submitted fields</h2>
-      <table class="source-table"><thead><tr><th scope="col">Field</th><th scope="col">Submitted value</th><th scope="col">Validation</th></tr></thead><tbody id="source-values"></tbody></table>
+      <table class="source-table"><thead><tr><th scope="col">Inventory field</th><th scope="col">Submitted value</th><th scope="col">Validation</th></tr></thead><tbody id="source-values"></tbody></table>
+      <details id="not-checked" class="source-extras" hidden><summary id="not-checked-title"></summary><div id="not-checked-list"></div></details>
+      <details id="extra-values" class="source-extras" hidden><summary>Additional source columns · reference only</summary><div class="table-scroll"><table><thead><tr><th>Source column</th><th>Submitted value</th></tr></thead><tbody id="extra-values-body"></tbody></table></div></details>
     </div>
   </section>
 </main>
 <dialog id="upload-dialog" aria-labelledby="upload-title">
-  <div class="dialog-heading"><h2 id="upload-title">Upload file</h2><button class="icon-button" data-close="upload-dialog" aria-label="Close upload">×</button></div>
+  <div class="dialog-heading"><h2 id="upload-title">Upload inventory file</h2><button class="icon-button" data-close="upload-dialog" type="button" aria-label="Close upload">×</button></div>
   <form id="upload-form">
-    <label id="dropzone" class="dropzone" for="file"><span class="upload-icon" aria-hidden="true">↥</span><strong>Choose a file or drop it here</strong><span id="file-limits" class="muted small">CSV or XLSX · 10 MiB · 10,000 records</span><input id="file" type="file" accept=".csv,.xlsx" required></label>
-    <p id="chosen-file" class="small"></p>
-    <p class="muted small">Forms disclosure or raw agent export</p>
+    <label class="dropzone" for="file"><strong>Choose a file</strong><span id="file-limits" class="muted small">CSV or XLSX · 10 MiB · 10,000 records</span><input id="file" type="file" accept=".csv,.xlsx" required></label>
     <label id="sheet-label" hidden>Worksheet<select id="sheet"></select></label>
     <p id="upload-error" class="error-text" role="alert" hidden></p>
-    <button id="upload-submit" type="submit" class="primary wide">Validate file</button>
-    <p id="upload-progress" role="status" class="muted small" hidden>Reading the file and validating each record…</p>
+    <button id="upload-submit" type="submit" class="primary wide">Continue to mapping</button>
+    <p id="upload-progress" class="muted small" role="status" hidden>Reading columns and sample values…</p>
   </form>
+</dialog>
+<dialog id="rules-dialog" class="rules-dialog" aria-labelledby="rules-title">
+  <div class="dialog-heading"><div><h2 id="rules-title">Validation rules</h2><p id="rules-meta" class="muted small"></p></div><button class="icon-button" data-close="rules-dialog" type="button" aria-label="Close validation rules">×</button></div>
+  <label>Inventory field<select id="rules-field"></select></label><div id="rules-list"></div>
+</dialog>
+<dialog id="report-dialog" aria-labelledby="report-title">
+  <div class="dialog-heading"><h2 id="report-title">Download report</h2><button class="icon-button" data-close="report-dialog" type="button" aria-label="Close report options">×</button></div>
+  <label>Include<select id="report-scope"><option value="filtered">Current view</option><option value="all">Entire file</option></select></label>
+  <div class="report-links"><a id="issues-download" class="button primary" download>Issues report</a><a id="records-download" class="button" download>Records report</a></div><p class="small muted">CSV · Source columns and original values included</p>
 </dialog>
 </body>
 </html>
