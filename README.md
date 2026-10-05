@@ -4,9 +4,9 @@ A dark, read-only validation workspace for the AI Governance Team. Upload a Form
 
 ## Run
 
-The project files are available directly in [nikhila-gregforge/test](https://github.com/nikhila-gregforge/test). Choose **Code → Download ZIP**, extract it, and open a terminal in the folder containing `app.py` and `requirements.txt`. You can rename that folder to `centen_project`.
+The project files are available directly in [nikhila-gregforge/Invent_test](https://github.com/nikhila-gregforge/Invent_test). Choose **Code → Download ZIP**, extract it, and open a terminal in the folder containing `app.py` and `requirements.txt`. You can rename that folder to `centen_project`.
 
-If Git is available, you can instead run `git clone https://github.com/nikhila-gregforge/test.git centen_project` and then `cd centen_project`.
+If Git is available, you can instead run `git clone https://github.com/nikhila-gregforge/Invent_test.git centen_project` and then `cd centen_project`.
 
 Use your existing Python and pip installation (tested with Python 3.12):
 
