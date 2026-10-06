@@ -33,43 +33,37 @@ def csv_bytes(headers, rows):
 def select_records(snapshot, args):
     fields = {f['id'] for f in snapshot['fields']}
     if args.get('field') and args['field'] not in fields:
-        raise ValueError('Unknown inventory field filter.')
-    status = args.get('status','attention')
-    if status not in {'all','attention','Passed','Needs review','Failed'}:
-        raise ValueError('Unknown status filter.')
+        raise ValueError('Choose an inventory field from the filter list.')
+    status = args.get('status','Errors')
+    if status not in {'all','Passed','Errors'}:
+        raise ValueError('Choose All records, Errors or Passed.')
     search = args.get('q','').strip().casefold()
     result = []
-    for r in snapshot['records']:
-        if status=='attention' and r['status']=='Passed':
+    for record in snapshot['records']:
+        if status!='all' and record['status']!=status:
             continue
-        if status not in {'all','attention'} and r['status']!=status:
+        if search and not any(search in display(v).casefold() for v in [record['name'],record['application_id'],record['owner']]):
             continue
-        if search and not any(search in display(v).casefold() for v in [r['name'],r['response_id'],r['owner'],r['cells'].get('application_id')]):
+        if args.get('field') and not any(args['field'] in f['fields'] for f in record['findings']):
             continue
-        if args.get('field') and not any(args['field'] in f['fields'] for f in r['findings']):
-            continue
-        result.append(r)
-    return sorted(result,key=lambda r:(-r['errors'],-r['warnings'],r['source_row']))
+        result.append(record)
+    return sorted(result,key=lambda r:(-r['errors'],r['source_row']))
 
 
 def export_report(snapshot, records, kind):
     run = snapshot['run']
-    fields = snapshot['fields']
-    prefix = ['Validation run','Source file','Worksheet','Rules version','Validated as of','Mapping fingerprint']
-    context = [run['id'],run['filename'],run['sheet'],run['rules_version'],run['as_of'],run.get('mapping_hash','legacy')]
+    prefix = ['Validation run','Source file','Worksheet','Inventory format','Rules version','Validated as of']
+    context = [run['id'],run['filename'],run['sheet'],run['schema_version'],run['rules_version'],run['as_of']]
     if kind=='records':
         columns = snapshot['source_columns']
-        mapping = {f['label']:f.get('source') for f in fields}
-        return csv_bytes(prefix+['Source row','Record ID','Validation status','Errors','Warnings','Checks not run','Confirmed mapping']+['Source: '+c for c in columns],
-            (context+[r['source_row'],r['response_id'],r['status'],r['errors'],r['warnings'],
-             [c['reason'] for c in r.get('not_checked',[])],mapping]+[r['source_values'].get(c,'') for c in columns] for r in records))
-    if kind=='issues':
-        by_id = {f['id']:f for f in fields}
-        return csv_bytes(prefix+['Source row','Record ID','System name','Severity','Rule ID','Rule','Inventory fields',
-            'Source columns','Submitted values','What happened','Requirement','Why this severity','What to change in the source'],
-            (context+[r['source_row'],r['response_id'],r['name'],f['severity'],f['rule_id'],f['title'],
-             '; '.join(by_id[v]['label'] for v in f['fields']),
-             {by_id[v]['label']:by_id[v].get('source') for v in f['fields']},
-             {by_id[v]['label']:r['cells'].get(v,'') for v in f['fields']},f['message'],f.get('requirement',''),
-             f.get('why',f['message']),f['expected_condition']] for r in records for f in r['findings']))
-    raise ValueError('Choose an issues report or a records report.')
+        return csv_bytes(prefix+['Source row','Validation status','Error count','Checks blocked by errors']+['Source: '+c for c in columns],
+            (context+[r['source_row'],r['status'],r['errors'],[c['reason'] for c in r['not_checked']]]+
+             [r['source_values'][c] for c in columns] for r in records))
+    if kind=='errors':
+        labels = {f['id']:f['label'] for f in snapshot['fields']}
+        return csv_bytes(prefix+['Source row','Application / System ID','System name','Rule ID','Error',
+            'Inventory fields','Submitted values','Problem','How to fix','Requirement'],
+            (context+[r['source_row'],r['application_id'],r['name'],f['rule_id'],f['title'],
+             '; '.join(labels[v] for v in f['fields']),{labels[v]:r['cells'][v] for v in f['fields']},
+             f['message'],f['fix'],f['requirement']] for r in records for f in r['findings']))
+    raise ValueError('Choose an errors report or a records report.')

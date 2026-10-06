@@ -1,10 +1,10 @@
 # AI Inventory · AI Governance Team
 
-A dark, read-only workspace for batch inventory validation. Admins upload a file, confirm how its columns map to inventory fields, review individual records, and download reports. Built with Flask, HTML/CSS/JavaScript and SQLite; no frontend build or external service is required.
+A dark, read-only inventory validation workspace for admins. Upload a file using the fixed AI Inventory columns, inspect errors on each record, and download reports. Built with Flask, HTML/CSS/JavaScript and SQLite. No frontend build or external service is required.
 
 ## Setup
 
-Download the project using **Code → Download ZIP** in [Invent_test](https://github.com/nikhila-gregforge/Invent_test), then extract it. Open a terminal in the folder containing `app.py` and `requirements.txt`. You can name the extracted folder `centen_project`.
+Get the source from [Invent_test](https://github.com/nikhila-gregforge/Invent_test) using **Code → Download ZIP**, then extract it. Open a terminal in the folder containing `app.py` and `requirements.txt`. You can name the extracted folder `centen_project`.
 
 Alternatively:
 
@@ -13,72 +13,112 @@ git clone https://github.com/nikhila-gregforge/Invent_test.git centen_project
 cd centen_project
 ```
 
-Use Python **3.10 or newer** and pip (tested on Python 3.12.7):
+Use Python **3.10 or newer** and pip (tested with Python 3.12.7):
 
 ```bash
 python -m pip install -r requirements.txt
 python app.py
 ```
 
-These commands work in Windows PowerShell, macOS and Linux. On systems that name Python `python3`, substitute that command. SQLite is included with Python. No virtual environment or additional package manager is required.
+These commands work in Windows PowerShell, macOS and Linux. If Python is named `python3` on your system, substitute that command. SQLite is included with Python. No virtual environment or additional package manager is required.
 
-Open **http://127.0.0.1:8501**. Stop with Ctrl+C. Waitress serves the app on localhost.
+Open **http://127.0.0.1:8501**. Waitress serves the app on localhost. Stop with Ctrl+C.
 
 ## Test the experience
 
-1. Choose **Upload file**, select `example.csv`, then **Continue to mapping**. No review is saved at this point.
-2. Review the suggested source columns and sample values. Open **Rules** beside a field to see its requirements, severity explanations and accepted values. Click **Confirm mapping & validate**.
-3. Expect **3 records: 2 with errors, 0 with warnings only, 1 passed**. The table initially shows records needing attention. No matching-record dashboard or field-analysis sections appear on the first page.
-4. Select **LLM Count** under **Issues in field**. Only record `002` remains. Click any cell in its row. A separate, read-only record view highlights the technology/count inconsistency and explains why it is an error. The submitted count is `0`.
-5. Use **Back to results**. The filter and page are retained. Open **Download report**, keep **Current view**, and download the **Issues report**. It contains issues for record `002`. Select **Entire file** to export all records instead.
-6. Correct the source file externally: change record `002`'s LLM count to `2`, and record `003`'s State from `None` to `California`. Upload it again, review the remembered mapping, and validate. Expect **3 passed** in a new review. The earlier review remains unchanged.
-7. Try a file with different headers. Map each inventory field to the relevant source column, or choose **Not provided**. Renaming a column does not change validation policy. Business and technical owners accept a named person or one valid email.
-8. Restart the app and open **Reviews**. Saved reviews and their original findings remain available. Record URLs support refresh and browser Back/Forward.
+1. Choose **Upload file**. Download the empty **inventory template** to see the exact headers, or select the bundled `example.csv` and click **Validate file**.
+2. Expect **3 total records, 2 records with errors, 1 passed**. The table initially shows the two records with errors. There is no column-matching step.
+3. Select **LLM Count** under **Errors in field**. Only `APP-002` remains. Click any cell in its row. The record view highlights the submitted count `0` and explains that the declared LLM requires a positive count. **How to fix** tells you what to correct in the source.
+4. Use **Back to results**. The field filter and page are preserved. Open **Download report → Errors report** with **Current view** selected. It includes errors for `APP-002`. Choose **Entire file → Records report** to include all three records.
+5. Correct `example.csv` externally: change `APP-002`'s LLM count to `2`, and `APP-003`'s State from `None` to `California`. Upload the changed file. Expect **3 passed** in a new review; the first review is unchanged.
+6. Rename `Business Owner` to `Owner` in a copy and upload it. The upload stays open and lists **Missing columns: Business Owner** and **Unexpected columns: Owner**. No record review is created. Correct the header externally and upload again.
+7. To check descriptive errors, change a Business Purpose to `test` or a count to `Auto`. Each affected record shows an error with a source correction instruction. A real purpose such as “Automates regression testing for claims applications” remains acceptable.
+8. Restart the app. Both saved reviews remain available. Record URLs support refresh and browser Back/Forward. Record values have no editing controls.
 
 The example is synthetic and uses 2026 dates. Automated fixtures use an explicit validation date.
 
-## Mapping and validation
+## Required file format
 
-The inventory contract contains **23 fields plus an optional source record ID**. The filename and export format never choose a different rule set.
+Use **exactly these 23 headers**. Names, capitalization, spaces and punctuation must match. Column order may vary. No extra columns, blank headers, duplicate headers, alternate names, or long Forms question headers are accepted.
 
-- **CSV/XLSX:** up to 10 MiB and 10,000 data rows. UTF-8/BOM and Windows-1252 CSV are supported. Select a worksheet when an XLSX contains several nonempty sheets. Blank or duplicate headers must be corrected externally.
-- **Suggestions need confirmation:** recognized headers are hints, not a hardcoded import mapping. Ambiguous matches remain unresolved. Publisher, Owner, creation timestamps and organizational LOB are not automatically assigned to accountable owners, go-live dates or usage LOB.
-- **Explicit decisions:** choose one source column or Not provided for every inventory field. A source column can supply only one inventory field. Required fields may be marked Not provided; the review then shows a file notice and a missing-field error on every record. Conditional fields follow their displayed rules.
-- **Remembered mappings:** the most recently confirmed choices are suggested for the same normalized header set and rules version, regardless of filename, column order, capitalization or surrounding spacing. Every upload still requires confirmation. Changed headers start a new mapping review.
-- **Original values:** source rows, columns, cells, original upload bytes and the confirmed mapping are retained. Unmapped columns are reference data; they do not produce inventory findings. XLSX formulas in mapped fields produce errors and are never evaluated.
-- **Independent records:** errors affect the relevant record. Duplicate source/application IDs flag the matching rows; repeated names produce warnings. Numeric identifiers and leading zeros are preserved.
-- **Statuses:** Errors means at least one error; Warnings means no errors but one or more warnings or incomplete checks; Passed means all applicable checks completed without findings. The file totals count records and are mutually exclusive. A cross-field finding is one issue even when both fields are highlighted.
-- **Dependencies:** a check blocked by a missing/invalid prerequisite appears under **Checks could not run**. It is never presented as a passed check.
+| # | Column header |
+| --- | --- |
+| 1 | Application / System ID |
+| 2 | AI System / Solution Name |
+| 3 | Business Purpose / Intended Use |
+| 4 | Business Function |
+| 5 | Impact from AI (Patient/Member, Regulatory, Financial) |
+| 6 | Business Owner |
+| 7 | Technical Owner |
+| 8 | Vendor Owner |
+| 9 | Source of AI System |
+| 10 | Type(s) of AI Used |
+| 11 | ML/DL Models Count |
+| 12 | LLM Count |
+| 13 | Data Input to or Processed by AI Tool |
+| 14 | Data Environment |
+| 15 | Deployment Environment |
+| 16 | Deployment Status |
+| 17 | Go-Live Date |
+| 18 | LOB |
+| 19 | State |
+| 20 | Risk Tier |
+| 21 | Human-in-the-Loop |
+| 22 | Submitter Name |
+| 23 | Date Submitted |
 
-The **View validation rules** dialog is available during mapping, results and record review. Each field shows its format, examples, accepted choices, requirements, Error/Warning severity, reason and source correction action. The same catalogue in `inventory/validation.py` drives validation, UI explanations and issue reports. Saved reviews retain their original rules and explanations.
+All columns must exist. **Cell values** for Vendor Owner, the two model counts, and Go-Live Date are optional or conditional under the rules below. The other 19 fields require values. There is no separate source-record-ID column; Application / System ID and the source row number identify each record.
 
-Examples of applied rules:
+The first 21 names follow the AI Inventory reference headings. Submitter Name and Date Submitted remain separate inventory fields. The template, parser, field help and reports use the same central contract in `inventory/__init__.py`. The empty CSV template is generated by `/api/template`, so no separate template file needs to be maintained.
 
-- Real names and purposes are required. Test-only text such as `test`, `test123`, `this is a test`, `New Agent 4` and `TBD` fails. A meaningful description such as “Automates regression testing for claims applications” is accepted.
-- Business and technical owners accept a meaningful name, optionally with role/department, or one syntactically valid email. Invalid email formats fail. Valid addresses outside `centene.com` receive a warning asking for confirmation.
-- Counts distinguish blank, zero and Unknown. Model names, response modes, negatives and fractions fail. Declared LLM or ML/DL use requires a positive corresponding count. Broad technology labels may need confirmation rather than an assumed count.
-- Choice fields use the listed inventory values and documented aliases. Multiple choices use semicolons; Other requires a description. Allowed Unknown classifications receive warnings.
-- Active systems require a valid, nonfuture go-live date. Submission dates cannot be future. Supported formats are `YYYY-MM-DD`, US month/day slash dates and Excel date cells.
-- Vendor acquisition requires a meaningful vendor contact. Medicaid usage requires a jurisdiction. Exclusive choices such as None and All States cannot be combined with other selections.
+CSV and XLSX use this same contract, with limits of **10 MiB / 10,000 data rows**. CSV accepts UTF-8/BOM and Windows-1252. For multiple nonempty Excel worksheets, select the sheet to validate. Header checks run before record checks. Structural failures such as malformed CSV rows stop the upload and do not save a review. Blank interior records receive their own missing-value errors; trailing empty rows are ignored.
 
-## Review and reports
+## Validation behavior
 
-The first page contains upload access and recent reviews. Results contain only file totals, search, status/issue-field filters, a paginated record table, rules and downloads. Search covers name, source ID, application ID and business owner. **Issues in field** selects records with a finding involving that inventory field.
+Only two record outcomes exist:
 
-The two CSV reports use the same record selection as the table:
+- **Errors:** one or more definite validation errors.
+- **Passed:** all applicable configured checks complete without errors.
 
-- **Issues report:** every finding on the selected records, including source row, inventory fields, mapped source columns, submitted values, requirement, severity reason and source correction action.
-- **Records report:** one row per selected record, status/counts, incomplete checks, confirmed mapping and every original source value. Source headers use the prefix `Source: ` to prevent collisions with report columns such as Errors or Record ID.
+A failing record does not block valid records. Repeated application IDs flag the matching rows. A cross-field error counts once even when both fields are highlighted. A check blocked by another invalid field points to the underlying error; it cannot cause an incomplete record to appear Passed.
 
-**Current view** includes all filtered records across pages. **Entire file** ignores filters. Both reports include the run ID, original filename, worksheet, rules version, validation date and mapping fingerprint. Empty selections produce a header-only CSV. Formula-like CSV values are prefixed with an apostrophe for spreadsheet safety; the database retains the original input.
+Every error supplies the submitted value, a plain-language problem, and **How to fix** guidance. Rule IDs and exact requirements are secondary details. **View validation rules** shows accepted choices, formats, examples and conditional requirements. The executable catalogue in `inventory/validation.py` supplies the checks, field help and error reports.
 
-## Persistence and operations
+The retained checks include:
 
-`data/validations.sqlite3` stores original uploads, immutable result snapshots and confirmed mapping choices. Identical file bytes, worksheet, mapping, rules version and validation date reopen the same review. A changed mapping creates a separate review even for identical file bytes.
+- Required values, meaningful owner/submitter names, and actual system names/purposes. Test-only descriptions and placeholders fail; legitimate descriptions about software testing are accepted.
+- Business and technical owners accept a meaningful name, optionally with role/department, or one syntactically valid email address. Any email domain is accepted. Email delivery and directory membership are not checked.
+- Counts must be nonnegative whole numbers. `1.0` is accepted; response modes, model names, negatives and fractions fail. Blank, Unknown, TBD and Not Available are accepted unless an explicitly selected LLM or ML/DL technology requires a positive corresponding count.
+- Choice fields use the accepted values and listed cell-value aliases. Multiple values use semicolons; Other requires a description. Column-name aliases are not supported.
+- Active systems need an actual go-live date on or before the validation date. Submission dates cannot be in the future. A valid future date is allowed for systems that are not Active. Dates support `YYYY-MM-DD`, US month/day slash dates, and Excel date cells.
+- Vendor-built, licensed, off-the-shelf and hybrid acquisition require a meaningful vendor contact. Medicaid use requires a jurisdiction. None and All States must stand alone.
+- Actual application IDs must be unique within the file. Repeated Not Available and Unknown IDs are allowed. Repeated system names are allowed.
+- Excel formula cells produce errors. Replace formulas with their calculated values externally before uploading; the application never evaluates formulas.
 
-On first startup with a version-2 history database, the app saves `data/validations-before-mapping.sqlite3` and migrates the history schema. Old snapshots and uploaded bytes are not rewritten or revalidated. Historical reviews show the rule information captured at that time; they do not gain newly introduced explanations. The old onboarding `data/inventory.sqlite3` is left untouched. To back up, stop the application and copy `data/`.
+The former advisory-only checks have been removed. Valid external emails, repeated system names, permitted Unknown classifications, unavailable IDs, planned future dates and broad technology labels do not create a separate outcome or automatically become errors. An explicit positive-count requirement still applies when LLM or ML/DL is selected.
 
-Expected upload errors appear in the UI. Unexpected server failures return a generic error and log the exception type in the terminal without logging submitted values. There is no persistent failure-log dashboard or background reprocessing.
+## Results and reports
+
+The home page contains upload access and recent reviews. Results show **Total records / Records with errors / Passed**, search, an **All records / Errors / Passed** filter, an inventory-field error filter, and the record table. New reviews start with errors when present and show all records when everything passes.
+
+Search covers system name, application ID and business owner. **Errors in field** selects records with an error involving that field. Click any record row to open read-only details with error fields first.
+
+The two CSV reports use the same selection as the table:
+
+- **Errors report:** all errors on selected records, including source row, application ID, inventory fields, submitted values, problem, fix and requirement.
+- **Records report:** one row per selected record, its status/error count, any checks blocked by errors, and all original source values. Original field columns use the prefix `Source: ` to distinguish them from report metadata.
+
+**Current view** includes filtered records across every page. **Entire file** ignores filters. Reports include the run ID, original filename, worksheet, inventory format, rules version and validation date. Empty selections produce header-only CSVs. UTF-8 BOM supports spreadsheet opening, and formula-like values are prefixed with an apostrophe for spreadsheet safety. Original inputs remain unchanged in SQLite.
+
+## Persistence and earlier reviews
+
+`data/validations.sqlite3` stores original upload bytes and immutable result snapshots. Fixed-format reviews use `inventory_runs`. Identical file content, worksheet, inventory format, rules version and validation date reopen the same saved review. Changed content, rules or date produce a separate review.
+
+Earlier `validation_runs` tables are preserved byte-for-byte at the snapshot/upload level. Their history entries show **Previous rules · Upload again** and a notice explaining that a current-format upload is needed. They are never relabeled Passed, and old results are not mixed into current reports. Archived detail/report requests return the same re-upload notice. Legacy snapshots remain available in the database for provenance.
+
+When an older history database is first opened, a backup is saved as `data/validations-before-strict.sqlite3` before creating the new table. Existing historical tables and the former onboarding `data/inventory.sqlite3` are left intact. To back up, stop the application and copy `data/`.
+
+Expected upload problems appear in the UI. Unexpected server failures return a generic error and log the exception type in the terminal without submitted values. There is no persistent failure-log dashboard.
 
 | Environment variable | Default |
 | --- | --- |
@@ -88,7 +128,7 @@ Expected upload errors appear in the UI. Unexpected server failures return a gen
 | `AI_INVENTORY_MAX_ROWS` | `10000` |
 | `AI_INVENTORY_HOSTS` | `localhost,127.0.0.1,[::1]` |
 
-For a different port, use `PORT=8502 python app.py` on macOS/Linux, or `$env:PORT = '8502'` followed by `python app.py` in PowerShell.
+For another port, use `PORT=8502 python app.py` on macOS/Linux, or `$env:PORT = '8502'` followed by `python app.py` in PowerShell.
 
 ## Acceptance tests
 
@@ -96,7 +136,9 @@ For a different port, use `PORT=8502 python app.py` on macOS/Linux, or `$env:POR
 python -m pytest -q -s
 ```
 
-**110 passed, 4 skipped** in the default shareable suite. The skips are three opt-in browser tests and one private reference check. **114 passed** with both enabled. Checks cover mapping integrity/reuse, arbitrary headers, owners, dependencies, record independence, parsing, duplicate IDs, migration, concurrent uploads, immutable history, filters, report provenance, safe exports, API errors and read-only endpoints.
+The default suite runs **114 passed, 5 skipped**. The skips are four optional browser tests and one private input-reference check. With these enabled, **119 tests pass**.
+
+Coverage includes strict/reordered headers, template consistency, missing/extra/blank/duplicate columns, per-record errors, permitted former advisory cases, names/emails, conditional rules and dependencies, CSV/XLSX parsing, source preservation, concurrent uploads, history deduplication, archived reviews, filtered reports, safe downloads and read-only endpoints.
 
 Optional browser tests use installed Google Chrome and Playwright:
 
@@ -118,44 +160,43 @@ $env:AI_INVENTORY_BROWSER_CHANNEL = 'chrome'
 python -m pytest -q
 ```
 
-Alternatively, install Chromium with `python -m playwright install chromium` and leave `AI_INVENTORY_BROWSER_CHANNEL` unset. Browser tests use temporary servers/databases and synthetic records. They cover upload/mapping, ambiguous choices, missing fields, worksheet selection, source correction/re-upload, downloads, row clicks, keyboard access, filters/pagination on return, direct record links, refresh, retry, HTML escaping and mobile overflow.
+Alternatively, install Chromium with `python -m playwright install chromium` and leave `AI_INVENTORY_BROWSER_CHANNEL` unset. Tests use isolated servers/databases and synthetic records. They cover direct upload, template download, header errors, corrected re-upload, worksheet selection, actionable record errors, filtering/downloads, row clicks, keyboard access, Back/Forward, refresh, retries, archived notices, HTML escaping and mobile overflow.
 
-The private check is enabled with `AI_INVENTORY_AGENT_SNAPSHOT=/path/to/sample.csv` (PowerShell: set `$env:AI_INVENTORY_AGENT_SNAPSHOT`). It verifies all 249 reference rows are preserved, 249 nonnumeric LLM counts are flagged, and 5 test-only descriptions are identified. Private company data is excluded from this repository.
+To run the private reference check, set `AI_INVENTORY_AGENT_SNAPSHOT` to the original source export path. It verifies that the former nonstandard export is rejected with missing/unexpected header details. It does not infer columns, modify the file, or bundle private company data.
 
-On Python 3.12.7/macOS, parsing and validation took about **0.16 seconds for 1,000 records** and **1.5 seconds for 10,000 records**, excluding persistence/browser rendering. A copy of the existing history database was also migrated and both report types exported successfully, with all original snapshot/upload hashes unchanged.
+On Python 3.12.7/macOS, parsing and validation took about **0.14 seconds for 1,000 records** and **1.4 seconds for 10,000 records**, excluding persistence/browser rendering. An isolated copy of the existing history was upgraded successfully; original snapshot/upload hashes remained unchanged.
 
 ## Remaining limits
 
-- No built-in login/SSO. The startup binds to localhost. A shared admin deployment needs an authenticated company hosting layer; allowed-host configuration does not authenticate users.
-- One source column maps to one inventory field. No split/join transformations, value-remapping editor, rule builder or record editing is included. Correct the source externally and upload it again.
-- Name and purpose checks are deterministic, not identity or semantic verification. Email delivery and directory membership are not checked.
-- Mapping previews show up to three distinct values sampled from the first 50 records. Refreshing before confirmation discards that unsaved upload; select the file again.
-- Dates in slash notation use US month/day order. Excel formulas must be replaced with values for inventory validation.
-- The app is verified on macOS/Chrome; it has not been executed on a Windows host. Setup uses portable Python/pip commands and the repository's source ZIP.
+- No built-in login or SSO. Startup binds to localhost. Shared admin hosting needs an authenticated company hosting layer; allowed-host settings alone do not authenticate users.
+- Columns must match the template exactly. Correct file headers and values externally, then upload again. No record editor, column conversion or rule builder is included.
+- Name/purpose checks are deterministic rather than identity or semantic verification.
+- Slash dates use US month/day order. Excel formulas require external conversion to values.
+- Verified on macOS/Chrome; execution on a Windows host has not been tested. Setup uses portable Python/pip commands and GitHub's source ZIP.
 
 ## Shareable files
 
 ```text
-app.py                     HTTP routes and local startup
+app.py                     HTTP routes, template download and local startup
 assets/
-  index.html               Upload, mapping, review and record views
+  index.html               Upload, review and read-only record views
   style.css                Dark responsive interface
-  app.js                   Mapping, navigation, filtering and downloads
+  app.js                   Navigation, filtering and downloads
   centene-logo.jpg          Bundled Centene logo
 inventory/
-  __init__.py              Inventory contract, choices and header hints
-  ingestion.py             Generic CSV/XLSX parser and mapping confirmation
+  __init__.py              Fixed inventory columns, values and field guidance
+  ingestion.py             Strict CSV/XLSX validation and parsing
   normalization.py         Value parsing without changing originals
-  validation.py            Executable rule catalogue and per-record checks
-  storage.py               SQLite history, migration and mapping memory
-  exports.py               Shared filters and traceable CSV reports
+  validation.py            Error rules and actionable fixes
+  storage.py               SQLite reviews and preserved historical snapshots
+  exports.py               Shared filters and CSV reports
 tests/
-  test_inventory.py        Mapping, rules, persistence and report checks
+  test_inventory.py        Contract, rules, persistence and report checks
   test_app.py               HTTP and optional browser acceptance tests
-example.csv                Three synthetic records
+example.csv                Three synthetic records in the required format
 requirements.txt           Runtime and standard test dependencies
 README.md                  Setup, workflow, tests and limitations
 .gitignore                 Local data and generated-file exclusions
 ```
 
-**17 files.** Databases, uploaded company data, virtual environments, caches and original handoff documents are excluded. No remote fonts/assets are loaded, and uploaded data is not sent to external services.
+**17 source files.** Local databases, private uploads, virtual environments, caches and original handoff documents are excluded. The app loads no remote assets or fonts and sends no uploaded data to external services.

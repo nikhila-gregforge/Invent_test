@@ -27,7 +27,7 @@ def category(value, field):
             match = re.fullmatch(r'(?: = |:\s*| - )(.+)', suffix)
             if match:
                 return canonical, match[1].strip()
-    raise ValueError('Choose a configured category; unrecognized text is not automatically Other.')
+    raise ValueError('This value is not one of the accepted choices for this field.')
 
 
 def count(value):
@@ -37,11 +37,11 @@ def count(value):
     if s.casefold() in {'unknown','tbd','not available'}:
         return None, 'unknown'
     if isinstance(value, bool) or not re.fullmatch(r'\+?\d+(?:\.\d+)?', s):
-        raise ValueError('Enter a nonnegative whole number, Unknown, or leave blank if optional.')
+        raise ValueError('A model count must be a whole number of 0 or greater.')
     try:
         n = Decimal(s)
         if not n.is_finite() or n != n.to_integral_value():
-            raise ValueError('Fractional counts are not allowed.')
+            raise ValueError('This count has a fraction; only whole numbers are accepted.')
         return int(n), 'known'
     except InvalidOperation as exc:
         raise ValueError('Invalid count.') from exc

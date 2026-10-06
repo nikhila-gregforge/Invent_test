@@ -1,47 +1,12 @@
-"""Inventory contract and optional header suggestions; upload names do not set policy."""
+"""Fixed inventory columns, accepted cell values and field guidance."""
 import os
 from pathlib import Path
 
-RULES_VERSION = '3.0'
+RULES_VERSION = '4.0'
+SCHEMA_VERSION = 'inventory-1'
 MAX_BYTES = int(os.getenv('AI_INVENTORY_MAX_BYTES', 10 * 1024 * 1024))
 MAX_ROWS = int(os.getenv('AI_INVENTORY_MAX_ROWS', 10000))
 DATA_DIR = Path(os.getenv('AI_INVENTORY_DATA_DIR', './data'))
-RECOGNIZED_DOMAINS = {'centene.com'}
-HEADER_ALIASES = {'ID': ['ID'],
- 'Q1': ["Provide the Application ID / System ID. If not available or unknown, please enter 'Not Available'."],
- 'Q2': ['Provide the official name of the AI System / Solution Name'],
- 'Q3': ['Business Purpose: Describe the primary business purpose of the AI system'],
- 'Q4': ['Business Function: Select the primary business function from the list below. If multiple apply, '
-        'select the primary function.'],
- 'Q5': ['Impact from AI (Patient/Member, Regulatory, Financial): Select the combined impact profile'],
- 'Q6': ['Business Owner: Enter one Centene email address for the accountable individual.'],
- 'Q7': ['Technical Owner: Enter one Centene email address for the accountable individual.'],
- 'Q8': ['Vendor Owner: Identify the accountable individual(s).'],
- 'Q9': ['Source of AI System: Indicate how the AI solution was acquired or developed.'],
- 'Q10': ['Type(s) of AI used: Select the primary AI technology type, if multiple select all that are used'],
- 'Q11': ['ML/DL Models Count: Enter the number of Machine Learning (ML) and Deep Learning (DL) models used '
-         'by the AI System, excluding Large Language Models (LLMs) reported in Question 12. Examples include '
-         '...',
-         'ML/DL Models Count: Enter the number of Machine Learning (ML) and Deep Learning (DL) models used '
-         'by the AI System, excluding Large Language Models (LLMs) reported in Question 12. Examples include '
-         'xgbo'],
- 'Q12': ['LLM Count: Enter the number of unique Large Language Models (LLMs) used by the AI System. Examples '
-         'include GPT-4o, GPT-5, Claude Sonnet, Gemini, Llama models etc. (Do not include LLMs in Question '
-         '11).'],
- 'Q13': ['Data input to or processed by AI tool: What type of data is being fed to AI?'],
- 'Q14': ['Data Environment: Where is data being sourced from?'],
- 'Q15': ['Deployment Environment: Where is AI running?'],
- 'Q16': ['Deployment Status: Lifecycle Status'],
- 'Q17': ['Go-Live Date'],
- 'Q18': ['Line of Business: Select all that apply'],
- 'Q19': ['State: Enter the states AIS is used in.'],
- 'Q20': ['Risk Tier'],
- 'Q21': ['Human-in-the-Loop: Is there human oversight or review at any stage of the operation of AI system',
-         'Human-in-the-Loop & Override Capability: Select the combined Human-in-the-Loop level + Override '
-         'capability.'],
- 'Q22': ['Submitter Name: Name of the person filling the form.'],
- 'Q23': ['Date Submitted']}
-
 FIELDS = dict(zip([f'Q{i}' for i in range(1, 24)], [
     'application_id', 'system_name', 'business_purpose', 'business_functions',
     'impact', 'business_owner_email', 'technical_owner_email', 'vendor_owner',
@@ -51,13 +16,13 @@ FIELDS = dict(zip([f'Q{i}' for i in range(1, 24)], [
     'submitter_name', 'submitted_date']))
 LABELS = dict(zip(FIELDS.values(), [
     'Application / System ID', 'AI System / Solution Name', 'Business Purpose / Intended Use',
-    'Business Function', 'Impact from AI', 'Business Owner', 'Technical Owner', 'Vendor Owner',
-    'Source of AI System', 'Types of AI Used', 'ML/DL Models Count', 'LLM Count',
-    'Data Input / Processed', 'Data Environment', 'Deployment Environment', 'Deployment Status',
-    'Go-Live Date', 'Line of Business', 'State', 'Risk Tier', 'Human-in-the-Loop',
+    'Business Function', 'Impact from AI (Patient/Member, Regulatory, Financial)', 'Business Owner', 'Technical Owner', 'Vendor Owner',
+    'Source of AI System', 'Type(s) of AI Used', 'ML/DL Models Count', 'LLM Count',
+    'Data Input to or Processed by AI Tool', 'Data Environment', 'Deployment Environment', 'Deployment Status',
+    'Go-Live Date', 'LOB', 'State', 'Risk Tier', 'Human-in-the-Loop',
     'Submitter Name', 'Date Submitted']))
-LABELS['override_capability'] = 'Override capability'
-LABELS['response_id'] = 'Source record ID'
+INVENTORY_FIELDS = list(FIELDS.values())
+HEADERS = [LABELS[field] for field in INVENTORY_FIELDS]
 MULTI = {'business_functions', 'ai_types', 'data_types', 'data_environments', 'lines_of_business', 'states'}
 COUNTS = {'ml_dl_count', 'llm_count'}
 DATES = {'go_live_date', 'submitted_date'}
@@ -88,27 +53,11 @@ ALIASES = {
   'External to Centene in Vendor cloud environment (e.g., Harvey AI runs in vendor AWS account)':'External to Centene in vendor cloud environment'},
  'human_oversight': {'Yes—at all stages':'Yes','Yes—at final stage':'Partially','Conditional':'Partially','Yes (all stages)':'Yes','Yes (final decision only)':'Partially','Conditional (exception)':'Partially','No (fully autonomous)':'No'},
 }
-# Header aliases only suggest choices. Every upload requires a confirmed mapping.
+# These aliases apply to cell values only. Column names must match HEADERS exactly.
 ALIASES['ai_types']['Generative AI'] = 'Generative AI (GenAI)'
-INVENTORY_FIELDS = [*FIELDS.values(), 'response_id']
-SOURCE_ALIASES = {
-    'response_id':['ID','Title ID','Record ID'],
-    'application_id':['Application ID','System ID'],
-    'system_name':['Name','System name','AI system name','AI name'],
-    'business_purpose':['Description','Purpose','Intended use'],
-    'business_functions':['Business Function'],
-    'ai_types':['Type(s) of AI used','AI technology'],
-    'data_types':['Data input to or processed by AI tool'],
-    'deployment_status':['Status'],
-    'lines_of_business':['LOB','Usage line of business'],
-    'states':['State'],
-    'human_oversight':['Human-in-the-Loop & Override Capability'],
-}
-# Publisher, Owner, creation dates and organization metadata are intentionally not
-# treated as accountable owners, go-live dates or usage scope.
 PLACEHOLDERS = {'','n/a','na','none','null','unknown','not available','not provided','no data provided','tbd'}
 FIELD_DESCRIPTIONS = {
-    'application_id':'The identifier of the application or AI system. Not Available and Unknown require review.',
+    'application_id':'The identifier of the application or AI system. Not Available and Unknown are accepted when the ID is unavailable.',
     'system_name':'The actual name of the AI system or solution.',
     'business_purpose':'What the system does, who it serves, and why it is used.',
     'business_owner_email':'The person accountable for business use: a name (with role or department if useful) or one valid email.',
@@ -125,7 +74,6 @@ FIELD_DESCRIPTIONS = {
     'states':'The jurisdictions where the system is used. An owner’s market is not automatically the usage jurisdiction.',
     'submitted_date':'The date this inventory information was submitted.',
     'submitter_name':'The name of the person supplying the inventory information.',
-    'response_id':'Optional source record identifier for tracing a row back to the uploaded file. Source row numbers are always retained.',
 }
 FIELD_EXAMPLES = {
     'application_id':'APP-001', 'system_name':'Claims reference assistant',
@@ -136,18 +84,16 @@ FIELD_EXAMPLES = {
     'llm_count':'0, 1, 2 or Unknown', 'ml_dl_count':'0, 1, 2 or Unknown',
     'impact':'Member: No; Regulatory: No; Financial: Yes',
     'go_live_date':'2026-01-02', 'submitted_date':'2026-09-01',
-    'submitter_name':'Alex Smith', 'response_id':'001',
+    'submitter_name':'Alex Smith',
 }
 
 def field_definition(field):
     if field in {'business_owner_email','technical_owner_email'}:
         format_hint='A person’s name, optionally with role or department, or exactly one valid email address.'
     elif field == 'application_id':
-        format_hint='The application ID. Not Available or Unknown is accepted with a warning.'
-    elif field == 'response_id':
-        format_hint='Optional. A supplied identifier must be unique within the file; leading zeros are preserved.'
+        format_hint='A unique application ID, or Not Available / Unknown when the ID is unavailable.'
     elif field in COUNTS:
-        format_hint='A whole number of 0 or greater. Blank means not supplied; Unknown requires review. A declared model type requires a positive count.'
+        format_hint='A whole number of 0 or greater. Blank and Unknown are accepted unless a declared model type requires a positive count.'
     elif field in DATES:
         format_hint='YYYY-MM-DD, M/D/YYYY, M/D/YY, or an Excel date cell. Slash dates use month/day order.'
     elif field == 'impact':

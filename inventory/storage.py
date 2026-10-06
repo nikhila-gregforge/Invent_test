@@ -1,4 +1,4 @@
-"""Immutable reviews, confirmed mappings and backwards-compatible SQLite history."""
+"""Immutable fixed-format reviews; earlier review snapshots remain archived intact."""
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from functools import lru_cache
@@ -9,22 +9,27 @@ import json
 import sqlite3
 import uuid
 import inventory as config
-from inventory.ingestion import parse_file, confirm_mapping, suggest_mapping, header_signature, header_key
-from inventory.validation import validate_upload, catalogue
-from inventory.exports import display
+from inventory.ingestion import parse_file
+from inventory.validation import validate_upload
 
-RUN_COLUMNS = ('id,filename,sheet,file_hash,profile,rules_version,as_of,created_at,total,passed,review,failed,original_file,snapshot')
-CREATE_RUNS = '''CREATE TABLE IF NOT EXISTS validation_runs (
+CREATE_RUNS = '''CREATE TABLE IF NOT EXISTS inventory_runs (
     id TEXT PRIMARY KEY, filename TEXT NOT NULL, sheet TEXT NOT NULL,
-    file_hash TEXT NOT NULL, profile TEXT NOT NULL, rules_version TEXT NOT NULL,
+    file_hash TEXT NOT NULL, schema_version TEXT NOT NULL, rules_version TEXT NOT NULL,
     as_of TEXT NOT NULL, created_at TEXT NOT NULL, total INTEGER NOT NULL,
-    passed INTEGER NOT NULL, review INTEGER NOT NULL, failed INTEGER NOT NULL,
-    original_file BLOB NOT NULL, snapshot BLOB NOT NULL, mapping_hash TEXT NOT NULL,
-    UNIQUE(file_hash,sheet,rules_version,as_of,mapping_hash))'''
+    passed INTEGER NOT NULL, errors INTEGER NOT NULL,
+    original_file BLOB NOT NULL, snapshot BLOB NOT NULL,
+    UNIQUE(file_hash,sheet,schema_version,rules_version,as_of))'''
+SUMMARY = 'id,filename,sheet,schema_version,rules_version,as_of,created_at,total,passed,errors'
 
 
 def today():
     return datetime.now(timezone.utc).date()
+
+
+class ArchivedReview(ValueError):
+    def __init__(self, run):
+        self.run = run
+        super().__init__('This review used an earlier file format and rule set. Use the current inventory template and upload the file again for a new result. The original upload and results are preserved.')
 
 
 class Store:
@@ -33,25 +38,15 @@ class Store:
         directory.mkdir(parents=True,exist_ok=True)
         self.path = directory/'validations.sqlite3'
         with self.connect() as db:
-            columns = {r['name'] for r in db.execute('PRAGMA table_info(validation_runs)')}
-            if columns and 'mapping_hash' not in columns:
-                # Preserve a recoverable copy before migrating any historical results.
-                backup = directory/'validations-before-mapping.sqlite3'
+            tables = {r['name'] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.has_archive = 'validation_runs' in tables
+            if self.has_archive and 'inventory_runs' not in tables:
+                backup = directory/'validations-before-strict.sqlite3'
                 if not backup.exists():
                     with sqlite3.connect(backup) as destination:
                         db.backup(destination)
-            db.execute('BEGIN IMMEDIATE')
-            columns = {r['name'] for r in db.execute('PRAGMA table_info(validation_runs)')}
-            if columns and 'mapping_hash' not in columns:
-                db.execute('ALTER TABLE validation_runs RENAME TO validation_runs_v2')
-                db.execute(CREATE_RUNS)
-                db.execute(f"INSERT INTO validation_runs ({RUN_COLUMNS},mapping_hash) SELECT {RUN_COLUMNS},'legacy' FROM validation_runs_v2")
-                db.execute('DROP TABLE validation_runs_v2')
-            else:
-                db.execute(CREATE_RUNS)
-            db.execute('''CREATE TABLE IF NOT EXISTS mapping_choices (
-                header_signature TEXT NOT NULL, rules_version TEXT NOT NULL,
-                mapping TEXT NOT NULL, PRIMARY KEY(header_signature,rules_version))''')
+            # Earlier tables are never rewritten. Only fixed-format reviews use this table.
+            db.execute(CREATE_RUNS)
 
     @contextmanager
     def connect(self):
@@ -65,86 +60,48 @@ class Store:
 
     def runs(self):
         with self.connect() as db:
-            return [dict(row) for row in db.execute('''SELECT id,filename,sheet,profile,rules_version,as_of,
-                created_at,total,passed,review,failed FROM validation_runs ORDER BY created_at DESC,id''')]
+            runs = [{**dict(row),'archived':False} for row in db.execute(f'SELECT {SUMMARY} FROM inventory_runs')]
+            if self.has_archive:
+                runs += [{**dict(row),'archived':True} for row in db.execute('''SELECT id,filename,sheet,
+                    rules_version,as_of,created_at,total FROM validation_runs''')]
+        return sorted(runs,key=lambda r:(r['created_at'],r['id']),reverse=True)
 
-    def preview(self, data, filename, sheet=None):
-        parsed = parse_file(data,filename,sheet)
-        signature = header_signature(parsed.columns)
-        with self.connect() as db:
-            saved = db.execute('SELECT mapping FROM mapping_choices WHERE header_signature=? AND rules_version=?',
-                               (signature,config.RULES_VERSION)).fetchone()
-        restored = False
-        mapping = suggest_mapping(parsed.columns)
-        if saved:
-            old = json.loads(saved['mapping'])
-            by_key = {header_key(c):c for c in parsed.columns}
-            candidate = {f:by_key.get(column) if column is not None else None for f,column in old.items()}
-            try:
-                confirm_mapping(parsed,candidate)
-                mapping,restored = candidate,True
-            except ValueError:
-                pass
-        samples = {}
-        for column in parsed.columns:
-            values = []
-            for row in parsed.rows[:50]:
-                value = display(row['values'][column])
-                if value and value not in values:
-                    values.append(value[:180]+('…' if len(value)>180 else ''))
-                if len(values)==3:
-                    break
-            samples[column] = values
-        return dict(filename=Path(filename.replace('\\','/')).name,sheet=parsed.sheet,total=len(parsed.rows),
-                    columns=parsed.columns,samples=samples,mapping=mapping,restored=restored,
-                    fields=catalogue(),file_hash=hashlib.sha256(data).hexdigest(),rules_version=config.RULES_VERSION)
-
-    def stage(self, data, filename, mapping, sheet=None, as_of=None, expected_hash=None, rules_version=None):
-        file_hash = hashlib.sha256(data).hexdigest()
-        if expected_hash is not None and expected_hash!=file_hash:
-            raise ValueError('The file changed after preview. Upload it again and confirm its mapping.')
-        if rules_version is not None and rules_version!=config.RULES_VERSION:
-            raise ValueError('The inventory rules changed after preview. Upload the file again to review the current rules.')
+    def stage(self, data, filename, sheet=None, as_of=None):
         as_of = as_of or today()
-        parsed = confirm_mapping(parse_file(data,filename,sheet),mapping)
-        mapping_hash = hashlib.sha256(json.dumps(parsed.mapping,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-        identity = (file_hash,parsed.sheet,config.RULES_VERSION,as_of.isoformat(),mapping_hash)
-        query = 'SELECT id FROM validation_runs WHERE file_hash=? AND sheet=? AND rules_version=? AND as_of=? AND mapping_hash=?'
+        parsed = parse_file(data,filename,sheet)
+        file_hash = hashlib.sha256(data).hexdigest()
+        identity = (file_hash,parsed.sheet,config.SCHEMA_VERSION,config.RULES_VERSION,as_of.isoformat())
+        query = 'SELECT id FROM inventory_runs WHERE file_hash=? AND sheet=? AND schema_version=? AND rules_version=? AND as_of=?'
         with self.connect() as db:
             existing = db.execute(query,identity).fetchone()
-            if existing:
-                self.remember(db,parsed)
         if existing:
             return existing['id']
         snapshot = validate_upload(parsed,as_of)
         identifier = str(uuid.uuid4())
         record = {'id':identifier,'filename':Path(filename.replace('\\','/')).name,'sheet':parsed.sheet,
-            'file_hash':file_hash,'profile':'inventory','rules_version':config.RULES_VERSION,'mapping_hash':mapping_hash,
+            'file_hash':file_hash,'schema_version':config.SCHEMA_VERSION,'rules_version':config.RULES_VERSION,
             'as_of':as_of.isoformat(),'created_at':datetime.now(timezone.utc).isoformat(),'total':len(snapshot['records']),
             'passed':sum(r['status']=='Passed' for r in snapshot['records']),
-            'review':sum(r['status']=='Needs review' for r in snapshot['records']),
-            'failed':sum(r['status']=='Failed' for r in snapshot['records'])}
+            'errors':sum(r['status']=='Errors' for r in snapshot['records']),'archived':False}
         snapshot['run'] = record
         payload = gzip.compress(json.dumps(snapshot,ensure_ascii=False,allow_nan=False).encode('utf-8'))
         with self.connect() as db:
-            db.execute(f'''INSERT OR IGNORE INTO validation_runs ({RUN_COLUMNS},mapping_hash)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (identifier,record['filename'],parsed.sheet,file_hash,'inventory',config.RULES_VERSION,record['as_of'],
-                 record['created_at'],record['total'],record['passed'],record['review'],record['failed'],data,payload,mapping_hash))
-            self.remember(db,parsed)
+            db.execute('''INSERT OR IGNORE INTO inventory_runs
+                (id,filename,sheet,file_hash,schema_version,rules_version,as_of,created_at,total,passed,errors,original_file,snapshot)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (identifier,record['filename'],parsed.sheet,file_hash,config.SCHEMA_VERSION,config.RULES_VERSION,
+                 record['as_of'],record['created_at'],record['total'],record['passed'],record['errors'],data,payload))
             return db.execute(query,identity).fetchone()['id']
-
-    @staticmethod
-    def remember(db,parsed):
-        remembered = {f:header_key(column) if column is not None else None for f,column in parsed.mapping.items()}
-        db.execute('''INSERT INTO mapping_choices VALUES (?,?,?) ON CONFLICT(header_signature,rules_version)
-            DO UPDATE SET mapping=excluded.mapping''',
-            (header_signature(parsed.columns),config.RULES_VERSION,json.dumps(remembered)))
 
     @lru_cache(maxsize=3)
     def snapshot(self, identifier):
         with self.connect() as db:
-            row = db.execute('SELECT snapshot FROM validation_runs WHERE id=?',(identifier,)).fetchone()
+            row = db.execute('SELECT snapshot FROM inventory_runs WHERE id=?',(identifier,)).fetchone()
+            if row is None and self.has_archive:
+                old = db.execute('''SELECT id,filename,sheet,rules_version,as_of,created_at,total
+                    FROM validation_runs WHERE id=?''',(identifier,)).fetchone()
+                if old:
+                    raise ArchivedReview({**dict(old),'archived':True})
         if row is None:
             raise KeyError('Validation review not found.')
         return json.loads(gzip.decompress(row['snapshot']))

@@ -1,12 +1,10 @@
-"""Read arbitrary source headers, then apply an explicitly confirmed mapping."""
+"""Read CSV/XLSX files that use the exact inventory column contract."""
 import csv
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from io import BytesIO, StringIO
 from pathlib import Path
-import hashlib
-import json
 import re
 from zipfile import BadZipFile
 from xml.etree.ElementTree import ParseError
@@ -30,7 +28,6 @@ class ParsedFile:
     rows: list
     sheet: str
     columns: list
-    mapping: dict | None = None
 
 
 def whitespace(value):
@@ -41,38 +38,23 @@ def header_key(value):
     return whitespace(value).casefold()
 
 
-def header_signature(columns):
-    return hashlib.sha256(json.dumps(sorted(header_key(c) for c in columns)).encode()).hexdigest()
+class HeaderMismatch(ImportFailure):
+    def __init__(self, headers):
+        self.missing = [h for h in config.HEADERS if h not in headers]
+        self.unexpected = list(dict.fromkeys(h for h in headers if h and h not in config.HEADERS))
+        counts = Counter(header_key(h) for h in headers if whitespace(h))
+        self.duplicates = list(dict.fromkeys(h for h in headers if whitespace(h) and counts[header_key(h)] > 1))
+        self.blank_columns = [i+1 for i,h in enumerate(headers) if not whitespace(h)]
+        super().__init__('The column headers do not match the AI Inventory template. Fix the headers in your file and upload it again.')
+
+    def details(self):
+        return dict(missing=self.missing,unexpected=self.unexpected,duplicates=self.duplicates,blank_columns=self.blank_columns)
 
 
-def suggest_mapping(columns):
-    """Suggestions are optional hints; never use them to validate without confirmation."""
-    result = {}
-    for field in config.INVENTORY_FIELDS:
-        aliases = [field, field.replace('_',' '), config.LABELS[field], *config.SOURCE_ALIASES.get(field, [])]
-        questions = ['ID'] if field == 'response_id' else [q for q,f in config.FIELDS.items() if f == field]
-        aliases += [name for q in questions for name in config.HEADER_ALIASES[q]]
-        candidates = [c for c in columns if header_key(c) in {header_key(a) for a in aliases}]
-        result[field] = candidates[0] if len(candidates) == 1 else ''
-    # A source column cannot silently supply multiple inventory fields.
-    used = Counter(v for v in result.values() if v)
-    return {f: (v if used[v] == 1 else '') for f,v in result.items()}
-
-
-def confirm_mapping(parsed, mapping):
-    if not isinstance(mapping,dict) or set(mapping) != set(config.INVENTORY_FIELDS):
-        raise ImportFailure('Choose a source column or Not provided for every inventory field.')
-    selected = []
-    for field, column in mapping.items():
-        if column is not None and (not isinstance(column,str) or column not in parsed.columns):
-            raise ImportFailure('Choose an existing source column or Not provided for '+config.LABELS[field]+'.')
-        if column is not None:
-            selected.append(column)
-    if len(selected) != len(set(selected)):
-        raise ImportFailure('Each source column can supply only one inventory field. Resolve the repeated selections.')
-    if not any(mapping[f] is not None for f in config.FIELDS.values()):
-        raise ImportFailure('Map at least one inventory field before validating.')
-    return replace(parsed, mapping=dict(mapping))
+def check_headers(headers):
+    error = HeaderMismatch(headers)
+    if error.missing or error.unexpected or error.duplicates or error.blank_columns:
+        raise error
 
 
 def _value(cell):
@@ -83,7 +65,7 @@ def _value(cell):
         return {'__excel_time__':value.isoformat()}
     if isinstance(value,(date,datetime)):
         return {'__excel_date__':value.isoformat()}
-    # Preserve displayed leading zeros before the admin identifies ID columns.
+    # Preserve displayed leading zeros, including application identifiers.
     if isinstance(value,(int,float)) and not isinstance(value,bool) and float(value).is_integer():
         if re.fullmatch('0{2,30}',cell.number_format):
             return str(int(value)).zfill(len(cell.number_format))
@@ -127,12 +109,8 @@ def parse_file(data, filename, sheet=None, max_bytes=None, max_rows=None):
                 header_cells.pop()
             headers = [c.value for c in header_cells]
             iterator = enumerate(reader,start=2)
-        if not headers or any(not whitespace(h) for h in headers):
-            raise ImportFailure('Every source column needs a name in the first row. Rename blank headers in the source file.')
-        headers = [str(h) for h in headers]
-        duplicates = [h for h,n in Counter(header_key(h) for h in headers).items() if n > 1]
-        if duplicates:
-            raise ImportFailure('Duplicate column names (ignoring case and spacing): '+', '.join(duplicates)+'. Rename them in the source file.')
+        headers = ['' if h is None else str(h) for h in headers]
+        check_headers(headers)
         result, pending = [], []
         for locator,row in iterator:
             formulas = []

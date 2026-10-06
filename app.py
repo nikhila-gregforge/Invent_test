@@ -1,13 +1,12 @@
 """Read-only AI Inventory validation workspace. Run: python app.py"""
 import os
-import json
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
 from werkzeug.exceptions import HTTPException, Forbidden
 import inventory as config
-from inventory.ingestion import ImportFailure, SheetSelectionRequired
-from inventory.storage import Store
-from inventory.exports import select_records, export_report
+from inventory.ingestion import ImportFailure, SheetSelectionRequired, HeaderMismatch
+from inventory.storage import Store, ArchivedReview
+from inventory.exports import select_records, export_report, csv_bytes
 from inventory.validation import catalogue
 
 ROOT=Path(__file__).resolve().parent
@@ -32,14 +31,19 @@ def create_app(data_dir=None):
     def index(): return send_from_directory(ROOT/'assets','index.html')
 
     @app.get('/api/health')
-    def health(): return jsonify(status='ok',rules_version=config.RULES_VERSION)
+    def health(): return jsonify(status='ok',rules_version=config.RULES_VERSION,schema_version=config.SCHEMA_VERSION)
 
     @app.get('/api/runs')
     def runs(): return jsonify(runs=store.runs(),max_bytes=config.MAX_BYTES,max_rows=config.MAX_ROWS)
 
     @app.get('/api/rules')
     def rules():
-        return jsonify(rules_version=config.RULES_VERSION,fields=catalogue())
+        return jsonify(rules_version=config.RULES_VERSION,schema_version=config.SCHEMA_VERSION,fields=catalogue())
+
+    @app.get('/api/template')
+    def template():
+        return Response(csv_bytes(config.HEADERS,[]),mimetype='text/csv',headers={
+            'Content-Disposition':'attachment; filename=ai-inventory-template.csv'})
 
     def uploaded_file():
         if request.headers.get('X-Requested-With')!='AIInventory':
@@ -51,22 +55,10 @@ def create_app(data_dir=None):
         if file is None or not file.filename: raise ValueError('Choose a CSV or XLSX file.')
         return file.read(config.MAX_BYTES+1),file.filename,request.form.get('sheet') or None
 
-    @app.post('/api/preview')
-    def preview():
-        data,filename,sheet=uploaded_file()
-        return jsonify(store.preview(data,filename,sheet))
-
     @app.post('/api/runs')
     def upload():
         data,filename,sheet=uploaded_file()
-        try:
-            mapping=json.loads(request.form['mapping'])
-        except (KeyError,ValueError):
-            raise ValueError('Review and confirm the column mapping before validating.')
-        if not request.form.get('file_hash') or not request.form.get('rules_version'):
-            raise ValueError('Upload the file for preview before confirming its mapping.')
-        identifier=store.stage(data,filename,mapping,sheet,
-            expected_hash=request.form['file_hash'],rules_version=request.form['rules_version'])
+        identifier=store.stage(data,filename,sheet)
         return jsonify(id=identifier),201
 
     @app.get('/api/runs/<identifier>')
@@ -80,8 +72,7 @@ def create_app(data_dir=None):
         pages=max(1,(len(records)+size-1)//size)
         page=min(page,pages)
         return jsonify(run=snapshot['run'],fields=snapshot['fields'],matched=len(records),page=page,pages=pages,size=size,
-            missing_required=snapshot.get('missing_required',[]),
-            records=[{k:r[k] for k in ['key','source_row','response_id','name','owner','status','errors','warnings','affected_fields']}
+            records=[{k:r[k] for k in ['key','source_row','application_id','name','owner','status','errors','affected_fields']}
                      for r in records[(page-1)*size:page*size]])
 
     @app.get('/api/runs/<identifier>/records/<int:key>')
@@ -95,12 +86,20 @@ def create_app(data_dir=None):
         snapshot=store.snapshot(identifier)
         args={'status':'all'} if request.args.get('scope')=='all' else request.args
         records=select_records(snapshot,args)
-        kind=request.args.get('kind','issues')
+        kind=request.args.get('kind','errors')
         payload=export_report(snapshot,records,kind)
         scope='all' if request.args.get('scope')=='all' else 'filtered'
         return Response(payload,mimetype='text/csv',headers={
             'Content-Disposition':f'attachment; filename="ai-inventory-{scope}-{kind}-{identifier[:8]}.csv"',
             'X-Record-Count':str(len(records))})
+
+    @app.errorhandler(HeaderMismatch)
+    def headers_mismatch(exc):
+        return jsonify(error=str(exc),columns=exc.details()),422
+
+    @app.errorhandler(ArchivedReview)
+    def archived(exc):
+        return jsonify(error=str(exc),archived=True,run=exc.run),409
 
     @app.errorhandler(SheetSelectionRequired)
     def sheets(exc): return jsonify(error=str(exc),sheets=exc.sheets),422

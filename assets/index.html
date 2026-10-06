@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark"><title>AI Inventory · Centene</title>
-  <link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/style.css?v=mapping-3">
-  <script src="/assets/app.js?v=mapping-3" defer></script>
+  <link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/style.css?v=inventory-4">
+  <script src="/assets/app.js?v=inventory-4" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -20,28 +20,22 @@
     <div id="home-empty" class="empty-state" hidden><h2>No reviews yet</h2><p>Upload an inventory file to start a review.</p></div>
     <div id="history-wrap" class="table-scroll" hidden><table class="history-table"><thead><tr><th>File</th><th>Records</th><th>Results</th><th>Reviewed</th></tr></thead><tbody id="history"></tbody></table></div>
   </section>
-  <section id="mapping-view" aria-labelledby="mapping-title" hidden>
-    <div class="step-label">UPLOAD <span>→</span> <strong>MAP COLUMNS</strong> <span>→</span> REVIEW</div>
-    <div class="page-heading"><div><h1 id="mapping-title" tabindex="-1">Map inventory fields</h1><p id="mapping-file" class="muted"></p></div><button id="mapping-rules" class="quiet" type="button">View validation rules</button></div>
-    <p id="mapping-origin" class="muted small"></p>
-    <div class="table-scroll"><table class="mapping-table"><thead><tr><th>Inventory field</th><th>Column in your file</th><th>Sample values</th></tr></thead><tbody id="mapping-rows"></tbody></table></div>
-    <details id="unmapped-details" class="source-extras"><summary id="unmapped-summary"></summary><p id="unmapped-columns" class="muted small"></p></details>
-    <div class="mapping-footer"><div><p id="mapping-progress" role="status"></p><p id="mapping-missing" class="small warning-text" hidden></p></div><div class="actions"><button id="mapping-fill" class="quiet" type="button">Mark remaining as not provided</button><button id="mapping-cancel" type="button">Cancel</button><button id="mapping-submit" class="primary" type="button" disabled>Confirm mapping &amp; validate</button></div></div>
-  </section>
   <section id="review-view" aria-labelledby="filename" hidden>
     <div class="page-heading"><div><h1 id="filename" tabindex="-1"></h1><p id="run-meta" class="muted small"></p></div><div class="actions"><button id="review-rules" class="quiet" type="button">View validation rules</button><button id="download-open" type="button">Download report</button></div></div>
+    <div id="archived-review" class="archive-notice" hidden><p id="archived-message"></p><a href="/api/template" download>Download inventory template</a></div>
+    <p id="results-loading" class="muted small" role="status" hidden>Loading records…</p>
+    <div id="review-content" hidden>
     <div id="summary" class="summary" aria-label="Results for the entire file"></div>
-    <p id="missing-columns" class="file-notice" hidden></p>
     <section class="filters" aria-label="Filter records">
       <label class="search-label">Search<input id="search" type="search" placeholder="Name, ID or owner" autocomplete="off"></label>
-      <label>Status<select id="status"><option value="attention">Needs attention</option><option value="all">All records</option><option value="Failed">Errors</option><option value="Needs review">Warnings</option><option value="Passed">Passed</option></select></label>
-      <label>Issues in field<select id="field"><option value="">All fields</option></select></label>
+      <label>Status<select id="status"><option value="all">All records</option><option value="Errors">Errors</option><option value="Passed">Passed</option></select></label>
+      <label>Errors in field<select id="field"><option value="">All fields</option></select></label>
       <button id="clear-filters" class="quiet" type="button">Clear filters</button>
     </section>
-    <p id="results-loading" class="muted small" role="status" hidden>Loading records…</p>
-    <div class="table-scroll"><table class="records-table"><thead><tr><th>Record</th><th>Status</th><th>Issues</th><th>Affected fields</th></tr></thead><tbody id="records"></tbody></table></div>
+    <div class="table-scroll"><table class="records-table"><thead><tr><th>Record</th><th>Status</th><th>Error count</th><th>Affected fields</th></tr></thead><tbody id="records"></tbody></table></div>
     <div id="no-results" class="empty-state" hidden><h2>No records in this view</h2><button id="show-all" type="button">Show all records</button></div>
     <footer class="pagination"><span id="record-count" role="status"></span><div><span id="page-info"></span><button id="previous" type="button" aria-label="Previous page">←</button><button id="next" type="button" aria-label="Next page">→</button></div></footer>
+    </div>
   </section>
   <section id="record-view" aria-labelledby="record-title" hidden>
     <button id="back-to-results" class="quiet back" type="button">← Back to results</button>
@@ -51,18 +45,19 @@
     <div id="record-content" hidden>
       <table class="source-table"><thead><tr><th scope="col">Inventory field</th><th scope="col">Submitted value</th><th scope="col">Validation</th></tr></thead><tbody id="source-values"></tbody></table>
       <details id="not-checked" class="source-extras" hidden><summary id="not-checked-title"></summary><div id="not-checked-list"></div></details>
-      <details id="extra-values" class="source-extras" hidden><summary>Additional source columns · reference only</summary><div class="table-scroll"><table><thead><tr><th>Source column</th><th>Submitted value</th></tr></thead><tbody id="extra-values-body"></tbody></table></div></details>
     </div>
   </section>
 </main>
 <dialog id="upload-dialog" aria-labelledby="upload-title">
   <div class="dialog-heading"><h2 id="upload-title">Upload inventory file</h2><button class="icon-button" data-close="upload-dialog" type="button" aria-label="Close upload">×</button></div>
+  <p class="small muted">Use the exact inventory column names. Column order can vary. <a href="/api/template" download>Download template</a></p>
   <form id="upload-form">
     <label class="dropzone" for="file"><strong>Choose a file</strong><span id="file-limits" class="muted small">CSV or XLSX · 10 MiB · 10,000 records</span><input id="file" type="file" accept=".csv,.xlsx" required></label>
     <label id="sheet-label" hidden>Worksheet<select id="sheet"></select></label>
     <p id="upload-error" class="error-text" role="alert" hidden></p>
-    <button id="upload-submit" type="submit" class="primary wide">Continue to mapping</button>
-    <p id="upload-progress" class="muted small" role="status" hidden>Reading columns and sample values…</p>
+    <div id="header-errors" hidden></div>
+    <button id="upload-submit" type="submit" class="primary wide">Validate file</button>
+    <p id="upload-progress" class="muted small" role="status" hidden>Checking columns and validating records…</p>
   </form>
 </dialog>
 <dialog id="rules-dialog" class="rules-dialog" aria-labelledby="rules-title">
@@ -72,7 +67,7 @@
 <dialog id="report-dialog" aria-labelledby="report-title">
   <div class="dialog-heading"><h2 id="report-title">Download report</h2><button class="icon-button" data-close="report-dialog" type="button" aria-label="Close report options">×</button></div>
   <label>Include<select id="report-scope"><option value="filtered">Current view</option><option value="all">Entire file</option></select></label>
-  <div class="report-links"><a id="issues-download" class="button primary" download>Issues report</a><a id="records-download" class="button" download>Records report</a></div><p class="small muted">CSV · Source columns and original values included</p>
+  <div class="report-links"><a id="errors-download" class="button primary" download>Errors report</a><a id="records-download" class="button" download>Records report</a></div><p class="small muted">CSV · Source columns and original values included</p>
 </dialog>
 </body>
 </html>
