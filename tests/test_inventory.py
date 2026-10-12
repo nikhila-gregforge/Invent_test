@@ -5,14 +5,13 @@ import json
 import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
-from io import BytesIO, StringIO
+from datetime import date
+from io import StringIO
 from pathlib import Path
 from time import perf_counter
 import pytest
-from openpyxl import Workbook
 import inventory as config
-from inventory.ingestion import parse_file, ImportFailure, HeaderMismatch, SheetSelectionRequired
+from inventory.ingestion import parse_file, ImportFailure, HeaderMismatch
 from inventory.normalization import count, parse_date
 from inventory.validation import validate_row, validate_upload, placeholder_text, catalogue, RULES
 from inventory.storage import Store, ArchivedReview
@@ -32,7 +31,7 @@ def valid_row(rid='001', **changes):
     row = dict(zip(config.FIELDS, ['APP-'+rid,'Synthetic assistant '+rid,
         'Assist employees with locating approved internal reference material.',
         'Administrative / Back Office','Member: No, Regulatory: No, Financial: Yes',
-        'Alex Smith, Operations','technical@centene.com','', 'Developed in-house',
+        'Alex Smith <alex.smith@centene.com>, Operations','technical@centene.com','', 'Developed in-house',
         'LLM','', '1','Contains PII','Snowflake','Centene Cloud (AWS, Azure) account',
         'Active','1/2/2026','Commercial','CA','Medium','Yes','Synthetic Submitter','9/1/2026']))
     row.update(changes)
@@ -51,11 +50,10 @@ def dict_csv(rows):
     return stream.getvalue().encode('utf-8-sig')
 
 
-def xlsx_file(rows, mutate=None):
-    wb = Workbook(); ws = wb.active; ws.title = 'Disclosure'; ws.append(HEADERS)
-    for row in rows: ws.append([row.get(q,'') for q in config.FIELDS])
-    if mutate: mutate(wb)
-    out = BytesIO(); wb.save(out); wb.close(); return out.getvalue()
+def export_csv(rows):
+    inverse={field:question for question,field in config.FIELDS.items()}
+    return dict_csv([{header:row[inverse[field]] if field is not None else 'Export metadata'
+                      for header,field in config.EXPORT_COLUMNS.items()} for row in rows])
 
 
 def snapshot(rows): return validate_upload(parse_file(csv_file(rows),'source.csv'),AS_OF)
@@ -86,7 +84,7 @@ def test_contract_and_literal_values():
     source=parse_file(data,'any-name.csv'); raw=source.rows[0]['values']
     assert raw[HEADERS[0]]=='0007' and raw[HEADERS[1]]=='Café\xa0assistant'
     assert [raw[HEADERS[i-1]] for i in [18,11,12]]==['None;','0','Unknown']
-    for name in ['sample.csv','Forms.csv','agents.csv']:
+    for name in ['sample.csv','Forms.csv','agents.csv','INVENTORY.CSV']:
         assert parse_file(csv_file([valid_row()]),name).columns==HEADERS
 
 
@@ -143,65 +141,61 @@ def test_row_structure_blank_rows_and_limits():
         with pytest.raises(ImportFailure): parse_file(csv_file([valid_row()]),'file.csv',**kw)
 
 
-def test_xlsx_dates_leading_zeros_formulas_and_worksheets():
-    def mutate(wb):
-        ws=wb.active; ws['A2']=7; ws['A2'].number_format='0000'
-        ws['Q2']=datetime(2026,1,2); ws['L2']='=1+1'; wb.create_sheet('Empty')
-    source=parse_file(xlsx_file([valid_row()],mutate),'source.xlsx')
-    raw=source.rows[0]
-    assert raw['values'][HEADERS[0]]=='0007' and raw['values'][HEADERS[16]]['__excel_date__']=='2026-01-02T00:00:00'
-    assert raw['formulas']==['LLM Count']
+@pytest.mark.parametrize('name',['book.xlsx','book.xls','inventory.ods','report.pdf','data.json',
+                                'inventory.txt','inventory.tsv','archive.zip','inventory','inventory.csv.xlsx'])
+def test_only_csv_extensions_are_accepted(name):
+    with pytest.raises(ImportFailure,match='Only CSV files are accepted'):
+        parse_file(csv_file([valid_row()]),name)
+
+
+def test_csv_preserves_leading_zeros_dates_and_literal_formula_text():
+    source=parse_file(csv_file([valid_row(Q1='0007',Q17='2026-01-02',Q12='=1+1')]),'source.csv')
+    assert source.sheet==''
+    raw=source.rows[0]['values']
+    assert raw[HEADERS[0]]=='0007' and raw[HEADERS[16]]=='2026-01-02'
+    assert raw['LLM Count']=='=1+1'
     result=validate_upload(source,AS_OF)['records'][0]
-    assert {f['rule_id'] for f in result['findings']}=={'FORMULA-01'}
-    assert any(c['rule_id']=='COUNT-02' for c in result['not_checked'])
-    def several(wb): wb.copy_worksheet(wb.active).title='Second'
-    data=xlsx_file([valid_row()],several)
-    with pytest.raises(SheetSelectionRequired) as exc: parse_file(data,'source.xlsx')
-    assert exc.value.sheets==['Disclosure','Second']
-    assert parse_file(data,'source.xlsx','Second').sheet=='Second'
-    def invalid(wb): wb.active['A1']='Application ID'
-    with pytest.raises(HeaderMismatch): parse_file(xlsx_file([valid_row()],invalid),'bad.xlsx')
+    assert {f['rule_id'] for f in result['findings']}=={'COUNT-01'}
 
 
-@pytest.mark.parametrize('value,expected',[('0',(0,'known')),('1.0',(1,'known')),('',(None,'not_provided')),('TBD',(None,'unknown')),('Not Available',(None,'unknown'))])
+@pytest.mark.parametrize('value,expected',[('0',(0,'known')),('1.0',(1,'known')),('',(None,'not_provided')),('TBD',(None,'unknown')),('Not Available',(None,'unknown')),('N/A',(None,'unknown'))])
 def test_counts(value,expected): assert count(value)==expected
 
 
-@pytest.mark.parametrize('value',['-1','1.5','Infinity','NaN','one LLM','3 or 4','Auto/Quick/Think deeper','N/A',True,'1e3'])
+@pytest.mark.parametrize('value',['-1','1.5','Infinity','NaN','one LLM','3 or 4','Auto/Quick/Think deeper',True,'1e3'])
 def test_invalid_counts(value):
     with pytest.raises(ValueError): count(value)
     assert 'COUNT-01' in rules(validate(Q12=value)[1])
 
 
 @pytest.mark.parametrize('technology,llm,ml,error',[
- ('LLM','0','','COUNT-02'),('LLM','','','COUNT-02'),('LLM','Unknown','','COUNT-02'),
- ('ML','','0','COUNT-03'),('DL','','Unknown','COUNT-03'),('GenAI','','',None),
- ('Agentic AI','0','',None),('Predictive Analytics','','',None),('RPA','1','',None),
+ ('LLM','0','',None),('LLM','','','COUNT-02'),('LLM','Unknown','','COUNT-02'),
+ ('ML','','0','COUNT-03'),('DL','','Unknown','COUNT-03'),('GenAI','','','COUNT-02'),
+ ('Agentic AI','0','',None),('Predictive Analytics','','','COUNT-03'),('RPA','1','',None),
  ('GenAI','2','',None),('Predictive Analytics','','2',None),('RPA','Unknown','',None),('RPA','no','','COUNT-01')])
 def test_model_requirements(technology,llm,ml,error):
     assert rules(validate(Q10=technology,Q12=llm,Q11=ml)[1])==({error} if error else set())
 
 
-@pytest.mark.parametrize('value',['Alex Smith','Alex Smith, Operations','张伟','A. Kumar','alex-smith+alias@centene.com','owner@example.com'])
-def test_owner_names_and_valid_emails_are_accepted(value): assert not validate(Q6=value,Q7=value)[1]
+@pytest.mark.parametrize('value',['Alex Smith <alex.smith@centene.com>','alex@centene.com, Operations',
+                                '张伟 (wei@centene.com)','A. Kumar — a.kumar@centene.com',
+                                'alex-smith+alias@centene.com','a@centene.com;b@centene.com'])
+def test_owner_emails_with_names_and_notes_are_accepted(value): assert not validate(Q6=value,Q7=value)[1]
 
 
-@pytest.mark.parametrize('value',['test','TBD','123','a@','a@centene.com;b@centene.com'])
+@pytest.mark.parametrize('value',['TBD','123','a@','owner@example.com'])
 def test_invalid_owners(value): assert rules(validate(Q6=value)[1]) & {'REQ-02','EMAIL-01'}
 
 
 @pytest.mark.parametrize('field,value,rule_id',[
- ('Q16','Available','ENUM-01'),('Q16','Active;Pilot','ENUM-01'),('Q20','Very Low','ENUM-01'),
- ('Q19','Atlantis','ENUM-01'),('Q9','Other','ENUM-01'),('Q18','None;Medicare','SCOPE-01'),
- ('Q19','All States;CA','SCOPE-01'),('Q19','None;CA','SCOPE-01'),('Q5','no insights','IMPACT-01'),
- ('Q5','Member: No, Financial: Yes','IMPACT-01'),('Q5','Member: No, Member: Yes, Regulatory: No, Financial: No','IMPACT-01'),
- ('Q21','Autonomous sometimes','ENUM-01')])
+ ('Q16','Active;Pilot','ENUM-01'),('Q18','None;Medicare','SCOPE-01'),
+ ('Q19','All States;CA','SCOPE-01'),('Q19','None;CA','SCOPE-01')])
 def test_invalid_values(field,value,rule_id): assert rule_id in rules(validate(**{field:value})[1])
 
 
 def test_explicitly_permitted_values_and_former_advisory_cases_pass():
-    rows=[valid_row(Q1='Not Available',Q6='owner@example.com',Q20='Unknown',Q5='Unknown',Q21='Unknown',
-                   Q9='Other: Research prototype',Q10='GenAI',Q12='Unknown',Q16='Pilot',Q17='2030-01-01'),
+    rows=[valid_row(Q1='Not Available',Q6='owner@centene.com',Q20='Unknown',Q5='Unknown',Q21='Unknown',
+                   Q9='Other: Research prototype',Q8='Research Vendor — Alex Smith',Q10='GenAI',Q12='0',Q16='Pilot',Q17=''),
           valid_row('002',Q1='Unknown',Q2='Synthetic assistant 001')]
     result=snapshot(rows)
     assert all(r['status']=='Passed' and not r['findings'] for r in result['records'])
@@ -213,7 +207,7 @@ def test_explicitly_permitted_values_and_former_advisory_cases_pass():
 def test_vendor_and_scope_errors():
     assert 'VENDOR-01' in rules(validate(Q9='Hybrid (in-house + vendor components)',Q8='N/A')[1])
     assert not validate(Q9='Other: Research prototype',Q8='')[1]
-    assert 'SCOPE-02' in rules(validate(Q18='Medicaid',Q19='None')[1])
+    assert not validate(Q18='Medicaid',Q19='None')[1]
     assert not validate(Q18='Medicaid',Q19='DC')[1]
     assert not validate(Q4='Fraud, Waste, & Abuse Detection;Claims Processing;Claims Processing;')[1]
 
@@ -228,7 +222,7 @@ def test_invalid_dates_for_all_lifecycles(value):
 def test_date_boundaries_and_oversight():
     assert parse_date('1/1/68')=='2068-01-01' and parse_date('1/1/69')=='1969-01-01'
     assert 'DATE-02' in rules(validate(Q17='')[1])
-    assert 'DATE-02' in rules(validate(Q17='2026-09-28')[1])
+    assert not validate(Q17='2026-09-28')[1]
     assert not validate(Q16='Pilot',Q17='2026-09-28')[1]
     assert 'DATE-05' in rules(validate(Q23='2026-09-28')[1])
     assert not validate(Q16='Retired',Q17='')[1]
@@ -237,18 +231,18 @@ def test_date_boundaries_and_oversight():
 
 
 def test_invalid_dependencies_produce_root_errors_without_cascading():
-    _,findings,blocked=validate(Q10='Unknown platform model',Q9='',Q16='Available',Q12='Auto')
+    _,findings,blocked=validate(Q10='',Q9='',Q16='Active;Pilot',Q12='Auto')
     assert rules(findings)=={'REQ-01','ENUM-01','COUNT-01'}
     assert {'COUNT-02','COUNT-03','VENDOR-01','DATE-02'} <= {c['rule_id'] for c in blocked}
     assert all(c['blocked_by'] and 'Fix ' in c['reason'] for c in blocked)
     result=snapshot([valid_row(Q18='Medicaid',Q19='')])['records'][0]
-    assert result['status']=='Errors' and result['errors']==1 and result['not_checked']
-    assert result['field_results']['lines_of_business']=='Depends on another field'
+    assert result['status']=='Errors' and result['errors']==1
+    assert result['field_results']['lines_of_business']=='No errors'
 
 
 @pytest.mark.parametrize('value',['test',' TEST123 ','testing','test test','this is a test','test-description','New Agent 4','Untitled Agent','TBD','12345'])
-def test_placeholder_patterns(value):
-    assert placeholder_text(value) and 'TEXT-01' in rules(validate(Q3=value)[1])
+def test_nonblank_descriptions_do_not_use_wording_heuristics(value):
+    assert not validate(Q2=value,Q3=value)[1]
 
 
 @pytest.mark.parametrize('value',['Automates regression testing for claims applications.','Test eligibility rules against approved scenarios.','Latest claims guidance retrieval','Contest administration for employee events'])
@@ -259,7 +253,7 @@ def test_legitimate_testing_purposes(value):
 
 def test_independent_rows_duplicate_ids_and_bounded_diagnostics():
     alone=snapshot([valid_row()])['records'][0]
-    batch=snapshot([valid_row(),valid_row('002',Q3='test',Q12='zero')])
+    batch=snapshot([valid_row(),valid_row('002',Q3='',Q12='zero')])
     assert alone==batch['records'][0] and batch['records'][1]['errors']==2
     repeated=snapshot([valid_row(Q1='0007'),valid_row('002',Q1=' 0007 ',Q2='Other assistant'),valid_row('003')])['records']
     assert all({f['rule_id'] for f in r['findings']}=={'ID-02'} for r in repeated[:2])
@@ -270,9 +264,9 @@ def test_independent_rows_duplicate_ids_and_bounded_diagnostics():
     assert all(len(f['message'])<300 for r in records for f in r['findings'])
 
 
-def test_duplicate_exemptions_only_apply_to_documented_id_values():
+def test_unavailable_id_placeholders_are_not_treated_as_duplicate_actual_ids():
     records=snapshot([valid_row(Q1='NA'),valid_row('002',Q1='NA')])['records']
-    assert all(r['status']=='Errors' and r['findings'][0]['rule_id']=='ID-02' for r in records)
+    assert all(r['status']=='Passed' for r in records)
 
 
 def test_actionable_messages_and_shared_rule_catalogue():
@@ -281,12 +275,12 @@ def test_actionable_messages_and_shared_rule_catalogue():
     for field in catalogue():
         assert field['format'] and field['description']
         for spec in field['checks']: assert spec['fix'] and spec['requirement'] and 'check' not in spec and 'severity' not in spec
-    findings=validate(Q3='test',Q12='Auto',Q6='')[1]
+    findings=validate(Q3='',Q12='Auto',Q6='')[1]
     for finding in findings:
         assert finding.fix and finding.message
         assert finding.requirement==by_id[finding.rule_id]['requirement']
-    assert 'Describe what the system does' in next(f.fix for f in findings if f.rule_id=='TEXT-01')
-    assert 'person’s name' in next(f.fix for f in findings if f.rule_id=='REQ-01')
+    assert 'Describe what the system does' in next(f.fix for f in findings if f.fields==['business_purpose'])
+    assert '@centene.com' in next(f.fix for f in findings if f.rule_id=='REQ-01')
 
 
 def test_immutable_history_deduplication_and_original_upload(tmp_path,monkeypatch):
@@ -311,6 +305,34 @@ def test_concurrent_identical_uploads(tmp_path):
     assert len(set(ids))==1 and len(store.runs())==1
 
 
+def test_delete_removes_only_selected_review_and_upload_and_allows_reupload(tmp_path):
+    store=Store(tmp_path); reader=Store(tmp_path)
+    data=csv_file([valid_row()]); first=stage(store,data)
+    second=stage(store,csv_file([valid_row('002')]))
+    untouched=json.dumps(store.snapshot(second),sort_keys=True)
+    assert reader.snapshot(first)['run']['id']==first
+    store.delete(first)
+    for instance in [store,reader,Store(tmp_path)]:
+        with pytest.raises(KeyError,match='Validation review not found'): instance.snapshot(first)
+        assert json.dumps(instance.snapshot(second),sort_keys=True)==untouched
+    with store.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM inventory_runs WHERE id=?',(first,)).fetchone()[0]==0
+    with pytest.raises(KeyError): store.delete(first)
+    replacement=stage(store,data)
+    assert replacement!=first and store.snapshot(replacement)['records'][0]['status']=='Passed'
+
+
+def test_delete_archived_review_preserves_current_reviews_and_existing_backup(tmp_path):
+    create_legacy_database(tmp_path); store=Store(tmp_path)
+    current=stage(store,csv_file([valid_row()]))
+    backup=(tmp_path/'validations-before-strict.sqlite3').read_bytes()
+    store.delete('old-run')
+    assert [run['id'] for run in store.runs()]==[current]
+    with pytest.raises(KeyError): store.snapshot('old-run')
+    assert store.snapshot(current)['run']['id']==current
+    assert (tmp_path/'validations-before-strict.sqlite3').read_bytes()==backup
+
+
 def test_old_reviews_are_archived_without_changing_results(tmp_path):
     data,blob=create_legacy_database(tmp_path); store=Store(tmp_path)
     assert (tmp_path/'validations-before-strict.sqlite3').exists()
@@ -330,7 +352,7 @@ def test_formula_export_safety(value): assert safe_cell(value)=="'"+value
 
 
 def test_filters_reports_and_snapshot_immutability(tmp_path):
-    store=Store(tmp_path); identifier=stage(store,csv_file([valid_row(),valid_row('002',Q3='test'),valid_row('003',Q12='0')]))
+    store=Store(tmp_path); identifier=stage(store,csv_file([valid_row(),valid_row('002',Q3=''),valid_row('003',Q12='-1')]))
     data=store.snapshot(identifier); frozen=json.dumps(data,sort_keys=True)
     selected=select_records(data,{'status':'all','field':'business_purpose'})
     assert [r['application_id'] for r in selected]==['APP-002']
@@ -358,7 +380,7 @@ def test_reports_keep_blank_zero_unknown_and_original_values(tmp_path):
 
 @pytest.mark.parametrize('size',[1000,10000])
 def test_batch_size_and_performance(size):
-    rows=[valid_row(str(i).zfill(5),Q6=f'owner-{i}@example.com',Q7=f'tech-{i}@centene.com') for i in range(size)]
+    rows=[valid_row(str(i).zfill(5),Q6=f'owner-{i}@centene.com',Q7=f'tech-{i}@centene.com') for i in range(size)]
     start=perf_counter(); data=snapshot(rows); elapsed=perf_counter()-start
     assert len(data['records'])==size and all(r['status']=='Passed' for r in data['records'])
     print(f'BATCH rows={size} parse_and_validate_seconds={elapsed:.3f}')

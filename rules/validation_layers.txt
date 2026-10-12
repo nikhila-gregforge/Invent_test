@@ -1,0 +1,338 @@
+Q1 Application ID / System ID
+
+Validation:
+
+- Required
+- Cannot contain only spaces
+
+Message:
+
+- Enter the Application ID/System ID or "Not Available".
+
+
+
+Q2 AI System / Solution Name
+
+Validation:
+
+- Required
+- Cannot contain only spaces
+
+Message:
+
+- Enter the official AI system or solution name.
+
+
+
+Q3 Business Purpose
+
+Validation:
+
+- Required
+- Cannot contain only spaces
+
+Message:
+
+- Describe the primary business purpose of the AI system.
+
+
+
+
+* Q4 Business Function
+
+Validation:
+*Note: Only 1 option needs to be selected
+
+- At least one option must be selected
+
+Message:
+
+- Select at least one business function.
+
+
+
+
+* Q5 Impact Profile
+
+Validation:
+*Note: Why "Other" is part of this question
+
+- One option must be selected
+
+Message:
+
+- Select the combined impact profile.
+
+
+
+* Q6 Business Owner
+
+Validation:
+*Note: multiple emails can come through as a response to this question.
+
+
+- Required
+- Must be a valid Centene email address
+- Only one email address allowed
+
+Message:
+
+- Enter one valid Centene email address.
+
+
+
+* Q7 Technical Owner
+
+Validation:
+*Note: multiple emails can come through as a response to this question.
+
+
+- Required
+- Must be a valid Centene email address
+- Only one email address allowed
+
+Message:
+
+- Enter one valid Centene email address.
+
+
+
+
+Q8 Vendor Owner
+
+Validation:
+
+- Required when Q9 is anything other than Developed In-House
+- Cannot contain only spaces
+
+Message:
+
+- Vendor Owner is required when a third-party vendor is involved.
+
+
+Note:
+
+- If a vendor is providing or supporting the solution, we should have a known point of contact for questions, issues, or governance reviews.
+
+
+
+
+Q9 Source of AI System
+
+Validation:
+
+- Required
+
+Message:
+
+- Select how the AI system was acquired or developed.
+
+Conditional Logic:
+
+If Q9 ≠ "Developed In-House", then Q8 (Vendor Owner) is required.
+
+
+
+
+Q10 Type(s) of AI Used
+
+Validation:
+
+- Required
+- At least one option must be selected
+
+Message:
+
+- Select at least one AI technology type.
+
+
+
+Q11 ML/DL Models Count
+
+Validation:
+
+- Required when Machine Learning or Deep Learning or Predictive Analytics is selected in Q10
+- Must be numeric
+- Must be a whole number
+- Must be greater than or equal to 1
+
+Message:
+
+- ML/DL Model Count is required when Machine Learning or Deep Learning is selected.
+- Enter a number greater than or equal to 1.
+
+Note:
+
+- If ML or DL is selected, this gives us a way to understand how many traditional ML/DL models are being used by the solution.
+
+
+
+Q12 LLM Count
+
+Validation:
+
+- Required when Q10 contains LLM, Generative AI, or Agentic AI
+- Must be numeric
+- Must be a whole number
+- Must be greater than or equal to 0
+
+Message:
+
+- LLM Count is required when Agentic AI, Generative AI, or LLM is selected.
+- Enter a whole number greater than or equal to 0.
+
+
+Note:
+
+- This helps us understand the scale of LLM usage within the solution and supports AI inventory reporting
+
+
+
+
+Q13 Data Input / Processed by AI
+
+Validation:
+
+- At least one option must be selected
+
+Message:
+
+- Select at least one data type processed by the AI system.
+
+
+
+
+Q14 Data Environment
+
+Validation:
+
+- At least one option must be selected
+
+Message:
+
+- Select at least one data source.
+
+
+
+
+Q15 Deployment Environment
+
+Validation:
+
+- Required
+
+Message:
+
+- Select the deployment environment.
+
+
+
+Q16 Lifecycle Status
+
+Validation:
+
+- Required
+- One option must be selected
+
+Message:
+
+- Select the AI system lifecycle status.
+
+
+
+Q17 Go-Live Date
+
+Validation:
+- Required when Lifecycle Status (Q16) = Active
+- Must be a valid date
+- Cannot be a future date
+
+Message:
+- Go-Live Date is required for Active AI systems.
+- Enter a valid Go-Live Date.
+- Go-Live Date cannot be in the future.
+
+Note:
+
+- Active indicates the solution is live and in production. The Go-Live Date tells us when production use began.
+
+
+
+Q18 Line of Business
+
+Validation:
+- At least one option must be selected
+- "None" cannot be selected with other values
+
+Message:
+- Select at least one Line of Business.
+- "None" cannot be selected with other Line of Business values.
+
+Note:
+
+- Selecting both "None" and a Line of Business creates conflicting information.
+
+
+
+Q19 State
+
+Validation:
+- At least one option must be selected
+- "All States" cannot be selected with individual states
+- "None (Internal / Enterprise-Wide Functions)" cannot be selected with individual states
+- "None (Internal / Enterprise-Wide Functions)" cannot be selected with "All States"
+
+
+Message:
+- Select the applicable state(s).
+- "All States" cannot be selected with individual states.
+- "None (Internal / Enterprise-Wide Functions)" cannot be selected with other state selections.
+
+
+
+
+
+Q20 Risk Tier
+
+Validation:
+- Required
+
+Message:
+- Select a Risk Tier.
+
+
+
+
+Q21 Human-in-the-Loop & Override Capability
+
+Validation:
+- Required
+
+Message:
+- Select the level of human oversight and override capability.
+
+
+
+
+Q22 Submitter Name
+
+Validation:
+- Required
+- Cannot contain only spaces
+
+Message:
+- Enter the name of the person submitting the form.
+
+
+
+
+Q23 Date Submitted
+
+Validation:
+- Required
+- Must be a valid date
+- Cannot be a future date
+
+Message:
+- Enter the submission date.
+- Submission Date cannot be in the future.

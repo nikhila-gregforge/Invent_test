@@ -63,6 +63,18 @@ button:disabled {
   background:var(--raised);
   border-color:transparent;
 }
+.danger {
+  color:var(--red);
+  border-color:#884d56;
+}
+.danger:hover {
+  background:#442c35;
+  border-color:var(--red);
+}
+.history-actions {
+  width:1%;
+  white-space:nowrap;
+}
 .wide {
   width:100%;
 }
@@ -578,9 +590,6 @@ dialog::backdrop {
   border-radius:4px;
   color:var(--text);
 }
-#sheet-label {
-  margin-bottom:18px;
-}
 #upload-error {
   margin:14px 0;
   font-size:12px;
@@ -816,3 +825,52 @@ body:has(dialog[open]) {
 .header-problem h3 { color: var(--red); }
 .header-problem p { color: var(--muted); }
 .header-problem ul { padding-left: 18px; margin-bottom: 0; }
+
+.inventory-charts { margin: 0 0 30px; }
+.inventory-result { font-size:12px; color:var(--muted); margin:-10px 0 26px; max-width:900px; }
+.charts-heading { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; margin-bottom:16px; }
+.charts-heading h2 { margin-bottom:5px; }
+.charts-heading p { margin-bottom:0; }
+.charts-heading label { min-width:190px; }
+.chart-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.chart-card { min-width:0; padding:18px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.chart-card h3 { font-size:15px; margin:0 0 4px; }
+.chart-basis { font-size:11px; color:var(--muted); margin-bottom:15px; }
+.pie-layout { display:flex; flex-direction:column; align-items:center; gap:12px; }
+.pie-chart { width:156px; height:156px; flex-shrink:0; }
+.pie-chart path:hover,.pie-chart circle:hover { filter:brightness(1.15); }
+.chart-legend-wrap { width:100%; min-width:0; }
+.chart-legend { table-layout:auto; font-variant-numeric:tabular-nums; }
+.chart-legend th,.chart-legend td { font-size:11px; padding:7px 4px; vertical-align:top; white-space:normal; background:transparent; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+.chart-legend tbody th { font-weight:400; color:var(--text); }
+.chart-legend th:not(:first-child),.chart-legend td { text-align:right; width:20%; }
+.chart-legend tr:last-child th,.chart-legend tr:last-child td { border-bottom:0; }
+.chart-category { display:flex; align-items:baseline; gap:7px; }
+.chart-swatch { display:inline-block; width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+.chart-coverage { display:block; color:var(--muted); font-size:10px; margin:2px 0 0 15px; }
+.chart-quality { padding-top:12px; margin:12px 0 0; border-top:1px solid var(--border); font-size:11px; color:var(--muted); }
+.chart-note { font-size:11px; color:var(--muted); margin:8px 0 0; }
+.chart-empty { color:var(--muted); padding:24px 0; text-align:center; }
+.more-charts { margin-top:16px; padding:15px 18px; border:1px solid var(--border); border-radius:7px; }
+.more-charts>summary { cursor:pointer; color:var(--accent); font-size:12px; font-weight:550; }
+.more-charts>label { max-width:360px; margin:18px 0; }
+.more-charts .pie-layout { flex-direction:row; align-items:flex-start; gap:32px; }
+.more-charts .chart-legend-wrap { max-width:750px; }
+.chart-bars { list-style:none; padding:0; margin:0; max-height:430px; overflow-y:auto; }
+.chart-bars li { padding:7px 6px 10px 0; }
+.chart-bar-label { display:flex; justify-content:space-between; gap:16px; font-size:12px; }
+.chart-bar-label strong { white-space:nowrap; font-variant-numeric:tabular-nums; font-weight:500; }
+.chart-bar-track { height:7px; margin-top:7px; border-radius:3px; background:var(--raised); overflow:hidden; }
+.chart-bar-fill { height:100%; border-radius:3px; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+@media(max-width:900px) {
+  .chart-grid { grid-template-columns:1fr; }
+  .pie-layout { flex-direction:row; align-items:flex-start; }
+}
+@media(max-width:560px) {
+  .charts-heading { flex-direction:column; gap:12px; }
+  .charts-heading label { width:100%; }
+  .chart-card { padding:14px; }
+  .pie-layout,.more-charts .pie-layout { flex-direction:column; align-items:center; gap:12px; }
+  .more-charts { padding:14px; }
+}

@@ -1,7 +1,6 @@
-"""Immutable fixed-format reviews; earlier review snapshots remain archived intact."""
+"""Saved review snapshots remain unchanged until explicitly deleted."""
 from datetime import datetime, timezone
 from contextlib import contextmanager
-from functools import lru_cache
 from pathlib import Path
 import gzip
 import hashlib
@@ -45,7 +44,7 @@ class Store:
                 if not backup.exists():
                     with sqlite3.connect(backup) as destination:
                         db.backup(destination)
-            # Earlier tables are never rewritten. Only fixed-format reviews use this table.
+            # Migrations preserve earlier reviews; users may explicitly delete them.
             db.execute(CREATE_RUNS)
 
     @contextmanager
@@ -66,9 +65,9 @@ class Store:
                     rules_version,as_of,created_at,total FROM validation_runs''')]
         return sorted(runs,key=lambda r:(r['created_at'],r['id']),reverse=True)
 
-    def stage(self, data, filename, sheet=None, as_of=None):
+    def stage(self, data, filename, as_of=None):
         as_of = as_of or today()
-        parsed = parse_file(data,filename,sheet)
+        parsed = parse_file(data,filename)
         file_hash = hashlib.sha256(data).hexdigest()
         identity = (file_hash,parsed.sheet,config.SCHEMA_VERSION,config.RULES_VERSION,as_of.isoformat())
         query = 'SELECT id FROM inventory_runs WHERE file_hash=? AND sheet=? AND schema_version=? AND rules_version=? AND as_of=?'
@@ -82,7 +81,7 @@ class Store:
             'file_hash':file_hash,'schema_version':config.SCHEMA_VERSION,'rules_version':config.RULES_VERSION,
             'as_of':as_of.isoformat(),'created_at':datetime.now(timezone.utc).isoformat(),'total':len(snapshot['records']),
             'passed':sum(r['status']=='Passed' for r in snapshot['records']),
-            'errors':sum(r['status']=='Errors' for r in snapshot['records']),'archived':False}
+            'errors':sum(r['status']=='Errors' for r in snapshot['records']),'archived':False,'input_layout':parsed.layout}
         snapshot['run'] = record
         payload = gzip.compress(json.dumps(snapshot,ensure_ascii=False,allow_nan=False).encode('utf-8'))
         with self.connect() as db:
@@ -93,7 +92,15 @@ class Store:
                  record['as_of'],record['created_at'],record['total'],record['passed'],record['errors'],data,payload))
             return db.execute(query,identity).fetchone()['id']
 
-    @lru_cache(maxsize=3)
+    def delete(self, identifier):
+        with self.connect() as db:
+            deleted = db.execute('DELETE FROM inventory_runs WHERE id=?',(identifier,)).rowcount
+            if not deleted and self.has_archive:
+                deleted = db.execute('DELETE FROM validation_runs WHERE id=?',(identifier,)).rowcount
+            if not deleted:
+                raise KeyError('Validation review not found.')
+
+    # Read from SQLite so a deleted review cannot remain available in a cache.
     def snapshot(self, identifier):
         with self.connect() as db:
             row = db.execute('SELECT snapshot FROM inventory_runs WHERE id=?',(identifier,)).fetchone()

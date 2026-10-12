@@ -3,10 +3,12 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field as dc_field
 from datetime import date
 from functools import lru_cache
+from html import unescape
 import re
 from email_validator import validate_email, EmailNotValidError
 import inventory as config
-from inventory.normalization import normalize, text
+from inventory.normalization import category, normalize, text
+from inventory.analytics import invalid_chart_fields
 
 RULES = []
 
@@ -37,15 +39,15 @@ class Context:
     inputs: dict
     product: dict
     problems: dict
-    formulas: set
     source_row: int
     as_of: date
     groups: dict = dc_field(default_factory=dict)
+    source_values: dict = dc_field(default_factory=dict)
     not_checked: list = dc_field(default_factory=list)
     current: dict = dc_field(default_factory=dict)
 
     def invalid(self, *fields):
-        blocked = [f for f in fields if f in self.problems or f in self.formulas]
+        blocked = [f for f in fields if f in self.problems]
         if blocked:
             self.skip(blocked)
         return bool(blocked)
@@ -67,16 +69,27 @@ def valid_email(value):
         return False
 
 
+# Extract full candidates so an invalid address cannot pass through a valid substring.
+EMAIL_PATTERN = re.compile(r"(?<![\w.!#$%&'*+/=?^`{|}~@-])[\w.!#$%&'*+/=?^`{|}~-]+@(?:[\w-]+\.)+[\w-]+(?![\w@-])")
+
+
+@lru_cache(maxsize=20000)
+def emails_in_text(value):
+    return tuple(dict.fromkeys(candidate for candidate in EMAIL_PATTERN.findall(unescape(value)) if valid_email(candidate)))
+
+
+def has_centene_email(value):
+    return any(address.rsplit('@',1)[1].casefold()=='centene.com' for address in emails_in_text(text(value)))
+
+
 def placeholder_text(value):
-    value = re.sub(r'\s+',' ',text(value)).casefold().strip(' .!_-')
-    return value in config.PLACEHOLDERS or value.isnumeric() or bool(re.fullmatch(
-        r'(?:(?:this is|just|for) (?:a )?)?(?:test(?:ing)?(?:[\s._-]*(?:test|\d+|agent|description|purpose|system|name|data))*)'
-        r'|new agent(?:[\s._-]*\d+)?|untitled(?: agent)?|dummy|sample|asdf|abc',value))
+    value = re.sub(r'\s+',' ',text(value)).casefold()
+    return value in config.PLACEHOLDERS or not any(ch.isalpha() for ch in value)
 
 
 def value_hint(field):
     if field in OWNERS:
-        return 'Enter the accountable person’s name, optionally with role or department, or one valid email address.'
+        return 'Enter the owner’s name or a valid @centene.com email. Names, roles, notes and multiple contacts are accepted.'
     if field == 'business_purpose':
         return 'Describe what the system does and who uses it. Example: Helps claims staff find approved internal guidance.'
     if field == 'system_name':
@@ -84,7 +97,7 @@ def value_hint(field):
     if field == 'submitter_name':
         return 'Enter the name of the person submitting this inventory record.'
     if field == 'application_id':
-        return 'Enter the application’s unique ID. If it is unavailable, enter Not Available.'
+        return 'Enter the Application ID/System ID or Not Available.'
     definition = config.field_definition(field)
     return 'Enter '+config.LABELS[field]+'. '+definition['format']
 
@@ -98,89 +111,82 @@ def required(c):
             yield [f], config.LABELS[f]+' is blank.', value_hint(f)
 
 
-@rule('FORMULA-01','Provide the actual value',config.INVENTORY_FIELDS,
-      'Inventory cells must contain literal values. Excel formulas are not evaluated.',
-      'In the source workbook, replace the formula with its calculated value using Paste Special → Values, then upload again.')
-def formulas(c):
-    for f in sorted(c.formulas):
-        yield [f], 'This cell contains an Excel formula, so its actual value cannot be validated.'
-
-
 def format_rule(identifier, title, fields, requirement, fix):
     @rule(identifier,title,fields,requirement,fix)
     def check(c):
         for f in fields:
-            if f in c.problems and f not in c.formulas:
+            if f in c.problems:
                 yield [f], config.LABELS[f]+': '+c.problems[f]
 
 
 format_rule('COUNT-01','Enter a whole-number model count',sorted(config.COUNTS),
-            'Use 0 or a whole number above 0. Blank, Unknown, TBD and Not Available are accepted unless the selected model type requires a positive count.',
-            'Count the actual models used and enter that whole number, such as 0, 1 or 2. A declared LLM or ML/DL model type requires at least 1 in its corresponding count.')
+            'Use a whole number of 0 or greater; a leading count with explanatory notes is accepted. Blank, Unknown and Not Applicable are accepted when a numeric count is not required by the selected technologies.',
+            'Count the actual models used and enter that whole number. ML, DL and Predictive Analytics require at least 1; LLM, GenAI and Agentic AI allow 0.')
 format_rule('DATE-01','Correct the date',sorted(config.DATES),
-            'Use YYYY-MM-DD, M/D/YYYY, M/D/YY, or an Excel date cell. Slash dates use month/day order.',
+            'Use YYYY-MM-DD, M/D/YYYY, or M/D/YY. Slash dates use month/day order.',
             'Enter a real calendar date, preferably using YYYY-MM-DD. Do not use a numeric Excel date serial or a description such as tomorrow.')
-format_rule('ENUM-01','Use an accepted value',list(config.OPTIONS),
-            'Use the accepted values for this field. Separate multiple selections with semicolons. Other requires a description.',
-            'Replace the value with an accepted choice listed under View field rules. For Other, enter Other: followed by a description.')
-format_rule('IMPACT-01','Complete the impact profile',['impact'],
-            'Supply Member, Regulatory and Financial exactly once each, using Yes, No or Unknown.',
-            'Enter all three actual impact values, for example Member: No; Regulatory: No; Financial: Yes. Change the example values to match this system.')
-
-
-@rule('TEXT-01','Describe the actual system',['system_name','business_purpose'],
-      'The system name and purpose must describe the real system. Test-only text, generic placeholders and numbers alone are not accepted.',
-      'Replace the placeholder with the actual system name or a description of its purpose.')
-def purpose(c):
-    for f in ['system_name','business_purpose']:
-        if f not in c.formulas and text(c.inputs.get(f)) and placeholder_text(c.inputs[f]):
-            yield [f], ('This description does not explain what the system does.' if f=='business_purpose'
-                        else 'This placeholder does not identify the AI system.'), value_hint(f)
+format_rule('ENUM-01','Provide a selection',[*config.OPTIONS, 'impact'],
+            'Required selections cannot consist only of separators. Deployment Status must contain one status. Source wording and choices outside the examples are accepted.',
+            'Enter the actual selection. For Deployment Status, select one current status.')
 
 
 OWNERS = ['business_owner_email','technical_owner_email']
-PEOPLE = [*OWNERS,'submitter_name']
+PEOPLE = OWNERS
 
 
 @rule('REQ-02','Identify the person',PEOPLE,
-      'Owners accept a person’s name or one valid email. The submitter must have a meaningful name. Placeholder values and values with no letters are not accepted.',
-      'Enter the person’s name, with role or department if useful. An owner may also be identified by one valid email.')
+      'Owners may be identified by name or Centene email. Missing-contact placeholders and values with no letters do not identify an owner.',
+      'Enter the owner’s name or a valid @centene.com email.')
 def people(c):
     for f in PEOPLE:
         value = text(c.inputs.get(f))
-        if f not in c.formulas and value and (placeholder_text(value) or not any(ch.isalpha() for ch in value)):
+        if value and (placeholder_text(value) or not any(ch.isalpha() for ch in value)):
             yield [f], config.LABELS[f]+' does not identify a person.', value_hint(f)
 
 
 @rule('EMAIL-01','Correct the owner email',OWNERS,
-      'A person’s name or one syntactically valid email is accepted. A value containing @ must be a valid email; any domain is allowed.',
-      'Correct the email address and include only one address, or replace it with the accountable person’s name.')
+      'Owner names are accepted. When email text is supplied, include at least one valid email with the exact domain centene.com. Multiple addresses and surrounding text are accepted. Delivery, directory membership and identity matching are not checked.',
+      'Correct the owner email to a valid @centene.com address, or identify the owner by name.')
 def owner_email(c):
     for f in OWNERS:
         value = text(c.inputs.get(f))
-        if f not in c.formulas and '@' in value and not valid_email(value):
-            yield [f], 'The email entered for '+config.LABELS[f]+' is not a valid single email address.'
+        if '@' in unescape(value) and not has_centene_email(value):
+            yield [f], config.LABELS[f]+' contains email text but no valid @centene.com email address.'
+
+
+@rule('EMAIL-02','Correct the vendor email',['vendor_owner'],
+      'Vendor contacts may use names or emails from any domain. If email text is supplied, it must contain at least one syntactically valid address; surrounding notes and multiple addresses are accepted.',
+      'Correct the vendor email address, or supply the vendor and accountable contact by name.')
+def vendor_email(c):
+    value = unescape(text(c.inputs.get('vendor_owner')))
+    if '@' in value and not emails_in_text(value):
+        yield ['vendor_owner'], 'Vendor Owner contains email text but no valid email address.'
 
 
 @rule('VENDOR-01','Identify the vendor contact',['ai_source','vendor_owner'],
-      'Vendor-built, licensed, off-the-shelf and hybrid systems require an accountable vendor contact. Other acquisition sources do not require one.',
-      'Enter the vendor name and accountable contact in Vendor Owner. Example: Example Vendor — Alex Smith.',depends=['ai_source'])
+      'Vendor Owner is required when Source of AI System identifies a vendor-built, licensed, purchased or hybrid solution. A platform name, Other or Unknown alone does not establish vendor involvement.',
+      'Enter the vendor contact’s name or email in Vendor Owner.',depends=['ai_source'])
 def vendor(c):
-    if c.product['ai_source'] in config.OPTIONS['ai_source'][1:5] and not c.invalid('vendor_owner') and placeholder_text(c.inputs.get('vendor_owner')):
-        yield ['ai_source','vendor_owner'], 'The selected acquisition source involves a vendor, but Vendor Owner does not identify a contact.'
+    source = c.product['ai_source']
+    if source == 'Other':
+        source, _ = category(c.product['other_details'].get('ai_source',''), 'ai_source')
+    contact = unescape(text(c.inputs.get('vendor_owner')))
+    if source in config.VENDOR_SOURCES and (placeholder_text(contact) or contact.casefold() == 'not applicable'):
+        yield ['vendor_owner'], 'The selected source indicates vendor involvement, but Vendor Owner is blank or marked unavailable.'
 
 
-def model_rule(identifier, field, technologies, title):
+def model_rule(identifier, field, technologies, title, minimum=1):
     @rule(identifier,title,['ai_types',field],
-          'When '+', '.join(sorted(technologies))+' is selected, '+config.LABELS[field]+' must be a whole number greater than 0.',
-          'Enter the actual positive model count. If this system does not use the selected model type, correct Type(s) of AI Used instead.',depends=['ai_types'])
+          'When '+', '.join(sorted(technologies))+' is selected, '+config.LABELS[field]+' must be a whole number of at least '+str(minimum)+'.',
+          'Enter the actual whole-number model count. ML, DL and Predictive Analytics require at least 1; LLM, GenAI and Agentic AI allow 0.',depends=['ai_types'])
     def check(c):
-        if set(c.product['ai_types']) & technologies and not c.invalid(field) and not (c.product[field] or 0)>0:
-            yield ['ai_types',field], ('The selected AI technology requires at least one model, but '+config.LABELS[field]+' is '+(text(c.inputs.get(field)) or 'blank')+'.')
+        selected = set(c.product['ai_types'])
+        if selected & technologies and not c.invalid(field) and (c.product[field] is None or c.product[field] < minimum):
+            yield ['ai_types',field], ('The selected AI technology requires a numeric '+config.LABELS[field]+' of at least '+str(minimum)+', but the submitted value is '+(text(c.inputs.get(field)) or 'blank')+'.')
 
 
-model_rule('COUNT-02','llm_count',{'Large Language Model (LLM)'},'Provide the number of LLMs used')
-model_rule('COUNT-03','ml_dl_count',{'Machine Learning (ML)','Deep Learning (DL)'},'Provide the number of ML/DL models used')
+model_rule('COUNT-02','llm_count',{'Large Language Model (LLM)','Generative AI (GenAI)','Agentic AI'},'Provide the number of LLMs used',minimum=0)
+model_rule('COUNT-03','ml_dl_count',{'Machine Learning (ML)','Deep Learning (DL)','Predictive Analytics'},'Provide the number of ML/DL models used')
 
 
 @rule('DATE-05','Correct the submission date',['submitted_date'],
@@ -192,16 +198,14 @@ def submitted_date(c):
         yield ['submitted_date'], 'Date Submitted is in the future relative to the validation date, '+c.as_of.isoformat()+'.'
 
 
-@rule('DATE-02','Provide the actual go-live date',['deployment_status','go_live_date'],
-      'An Active system must have an actual go-live date on or before the validation date. A valid planned date is allowed for other deployment statuses.',
-      'Enter the actual go-live date using YYYY-MM-DD. If the system is not yet operational, correct Deployment Status.',depends=['deployment_status'])
+@rule('DATE-02','Provide the go-live date',['deployment_status','go_live_date'],
+      'An Active system must have a valid go-live date. Future go-live dates are accepted for every deployment status.',
+      'Enter the go-live date using YYYY-MM-DD. Planned future dates are accepted.',depends=['deployment_status'])
 def active_date(c):
     if c.product['deployment_status']=='Active' and not c.invalid('go_live_date'):
         value = c.product['go_live_date']
         if not value:
             yield ['deployment_status','go_live_date'], 'The system is Active, but its go-live date is missing.'
-        elif date.fromisoformat(value)>c.as_of:
-            yield ['deployment_status','go_live_date'], 'The system is Active, but its go-live date is later than the validation date, '+c.as_of.isoformat()+'.'
 
 
 @rule('SCOPE-01','Correct the scope selections',['lines_of_business','states'],
@@ -213,26 +217,13 @@ def exclusive_scope(c):
             yield [f], config.LABELS[f]+' combines a choice that must stand alone with another selection.'
 
 
-@rule('SCOPE-02','Identify the Medicaid jurisdiction',['lines_of_business','states'],
-      'Medicaid use requires at least one state, District of Columbia or All States.',
-      'Enter the state or states where this system supports Medicaid. Use All States only if it applies to every state.',depends=['lines_of_business'])
-def medicaid(c):
-    if 'Medicaid' in c.product['lines_of_business']:
-        if c.invalid('states'):
-            return
-        if 'None' in c.product['states']:
-            yield ['lines_of_business','states'], 'Medicaid is selected, but State is set to None.'
-        elif not c.product['states']:
-            c.skip(['states'])
-
-
 @rule('ID-02','Use a unique application ID',['application_id'],
-      'An actual Application / System ID must be unique within the file. Repeated Not Available or Unknown values are allowed.',
+      'An actual Application / System ID must be unique within the file. Repeated unavailable-ID placeholders are allowed.',
       'Check the listed source rows. Remove unintended duplicate records, or enter the correct unique ID for each distinct system.')
 def duplicate_id(c):
     value = ' '.join(text(c.inputs.get('application_id')).casefold().split())
     rows = c.groups.get(value,[])
-    if len(rows)>1 and 'application_id' not in c.formulas:
+    if len(rows)>1:
         detail = ', '.join(map(str,rows[:20])) + (f' and {len(rows)-20} more' if len(rows)>20 else '')
         yield ['application_id'], 'This application ID is repeated in source rows '+detail+'.'
 
@@ -243,9 +234,9 @@ def catalogue():
             for fid in config.INVENTORY_FIELDS]
 
 
-def validate_row(inputs, source_row, as_of, formulas=(), groups=None):
-    product, problems = normalize(inputs,formulas)
-    c = Context(inputs,product,dict(problems),set(formulas),source_row,as_of,groups or {})
+def validate_row(inputs, source_row, as_of, groups=None, source_values=None):
+    product, problems = normalize(inputs)
+    c = Context(inputs,product,dict(problems),source_row,as_of,groups=groups or {},source_values=source_values or {})
     findings = []
     for spec in RULES:
         c.current = spec
@@ -264,16 +255,16 @@ def validate_row(inputs, source_row, as_of, formulas=(), groups=None):
 
 def validate_upload(parsed, as_of):
     records, prepared = [], []
+    extra_columns = [column for column in parsed.columns if column not in parsed.field_columns.values()]
     groups = defaultdict(list)
     for row in parsed.rows:
-        values = {f:row['values'][config.LABELS[f]] for f in config.INVENTORY_FIELDS}
-        formulas = {f for f in config.INVENTORY_FIELDS if config.LABELS[f] in row['formulas']}
-        prepared.append((row,values,formulas))
+        values = {f:row['values'][parsed.field_columns[f]] for f in config.INVENTORY_FIELDS}
+        prepared.append((row,values))
         value = ' '.join(text(values['application_id']).casefold().split())
-        if value and value not in {'not available','unknown'} and 'application_id' not in formulas:
+        if value and value not in config.PLACEHOLDERS:
             groups[value].append(row['source_row'])
-    for index,(row,values,formulas) in enumerate(prepared):
-        _,findings,not_checked = validate_row(values,row['source_row'],as_of,formulas,groups)
+    for index,(row,values) in enumerate(prepared):
+        product,findings,not_checked = validate_row(values,row['source_row'],as_of,groups,row['values'])
         issues = [f.to_dict() for f in findings]
         affected = list(dict.fromkeys(f for issue in issues for f in issue['fields']))
         dependent = {f for c in not_checked for f in c['fields']}
@@ -282,6 +273,8 @@ def validate_upload(parsed, as_of):
         records.append({'key':index,'source_row':row['source_row'],'application_id':text(values['application_id']),
             'name':text(values['system_name']),'owner':text(values['business_owner_email']),
             'cells':values,'source_values':row['values'],'findings':issues,'not_checked':not_checked,
+            'extra_values':{column:row['values'][column] for column in extra_columns},
+            'normalized':product,'chart_invalid_fields':invalid_chart_fields(issues),
             'field_results':field_results,'errors':len(findings),'status':'Errors' if findings else 'Passed','affected_fields':affected})
-    return {'fields':catalogue(),'records':records,'source_columns':parsed.columns,
+    return {'fields':catalogue(),'records':records,'source_columns':parsed.columns,'input_layout':parsed.layout,
             'as_of':as_of.isoformat(),'schema_version':config.SCHEMA_VERSION,'rules_version':config.RULES_VERSION}

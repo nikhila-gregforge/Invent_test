@@ -4,10 +4,11 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
 from werkzeug.exceptions import HTTPException, Forbidden
 import inventory as config
-from inventory.ingestion import ImportFailure, SheetSelectionRequired, HeaderMismatch
+from inventory.ingestion import ImportFailure, HeaderMismatch
 from inventory.storage import Store, ArchivedReview
 from inventory.exports import select_records, export_report, csv_bytes
 from inventory.validation import catalogue
+from inventory.analytics import distributions, inventory_error_count
 
 ROOT=Path(__file__).resolve().parent
 
@@ -45,21 +46,30 @@ def create_app(data_dir=None):
         return Response(csv_bytes(config.HEADERS,[]),mimetype='text/csv',headers={
             'Content-Disposition':'attachment; filename=ai-inventory-template.csv'})
 
-    def uploaded_file():
+    def check_write_request():
         if request.headers.get('X-Requested-With')!='AIInventory':
-            raise Forbidden('Upload requests must originate from this application.')
+            raise Forbidden('Requests that change saved reviews must originate from this application.')
         origin=request.headers.get('Origin')
         if origin and origin!=request.host_url.rstrip('/'):
-            raise Forbidden('Cross-origin uploads are not allowed.')
+            raise Forbidden('Cross-origin changes to saved reviews are not allowed.')
+
+    def uploaded_file():
+        check_write_request()
         file=request.files.get('file')
-        if file is None or not file.filename: raise ValueError('Choose a CSV or XLSX file.')
-        return file.read(config.MAX_BYTES+1),file.filename,request.form.get('sheet') or None
+        if file is None or not file.filename: raise ValueError('Choose a CSV file.')
+        return file.read(config.MAX_BYTES+1),file.filename
 
     @app.post('/api/runs')
     def upload():
-        data,filename,sheet=uploaded_file()
-        identifier=store.stage(data,filename,sheet)
+        data,filename=uploaded_file()
+        identifier=store.stage(data,filename)
         return jsonify(id=identifier),201
+
+    @app.delete('/api/runs/<identifier>')
+    def delete_review(identifier):
+        check_write_request()
+        store.delete(identifier)
+        return jsonify(deleted=identifier)
 
     @app.get('/api/runs/<identifier>')
     def results(identifier):
@@ -71,9 +81,17 @@ def create_app(data_dir=None):
         except ValueError: raise ValueError('Invalid pagination.')
         pages=max(1,(len(records)+size-1)//size)
         page=min(page,pages)
-        return jsonify(run=snapshot['run'],fields=snapshot['fields'],matched=len(records),page=page,pages=pages,size=size,
+        return jsonify(run=snapshot['run'],inventory_error_records=inventory_error_count(snapshot['records']),fields=snapshot['fields'],matched=len(records),page=page,pages=pages,size=size,
             records=[{k:r[k] for k in ['key','source_row','application_id','name','owner','status','errors','affected_fields']}
                      for r in records[(page-1)*size:page*size]])
+
+    @app.get('/api/runs/<identifier>/analytics')
+    def analytics(identifier):
+        snapshot=store.snapshot(identifier)
+        scope=request.args.get('scope','all')
+        if scope not in {'all','filtered'}: raise ValueError('Choose Entire file or Current view for charts.')
+        records=snapshot['records'] if scope=='all' else select_records(snapshot,request.args)
+        return jsonify(scope=scope,**distributions(snapshot,records))
 
     @app.get('/api/runs/<identifier>/records/<int:key>')
     def record(identifier,key):
@@ -100,9 +118,6 @@ def create_app(data_dir=None):
     @app.errorhandler(ArchivedReview)
     def archived(exc):
         return jsonify(error=str(exc),archived=True,run=exc.run),409
-
-    @app.errorhandler(SheetSelectionRequired)
-    def sheets(exc): return jsonify(error=str(exc),sheets=exc.sheets),422
 
     @app.errorhandler(ImportFailure)
     @app.errorhandler(ValueError)

@@ -2,6 +2,7 @@
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
+from html import unescape
 import re
 import inventory as config
 from inventory.ingestion import whitespace
@@ -17,25 +18,76 @@ def enum_labels(field):
                   key=lambda item:len(item[0]), reverse=True)
 
 def category(value, field):
-    submitted = whitespace(value)
+    submitted = whitespace(unescape(text(value)))
     lowered = submitted.casefold()
     for label, canonical in enum_labels(field):
         if lowered == label:
             return canonical, ''
         if lowered.startswith(label):
             suffix = submitted[len(label):]
-            match = re.fullmatch(r'(?: = |:\s*| - )(.+)', suffix)
+            match = re.fullmatch(r'(?: = |:\s*| [–—-] )(.+)', suffix)
+            if field == 'ai_source' and not match:
+                match = re.fullmatch(r',\s*(.+)', suffix)
             if match:
                 return canonical, match[1].strip()
-    raise ValueError('This value is not one of the accepted choices for this field.')
+    # The catalogue is for recognition and charts, not an exhaustive allowlist.
+    return submitted, ''
+
+
+def choice_selections(value, field):
+    """Split exported lists without splitting commas inside a known choice name."""
+    result = []
+    def label_at_start(candidate):
+        lowered = candidate.casefold()
+        for label, _ in enum_labels(field):
+            if lowered.startswith(label):
+                suffix = candidate[len(label):]
+                if not suffix or suffix.lstrip().startswith(',') or re.match(r'(?: = |:\s*| [–—-] )',suffix):
+                    return len(label)
+        return None
+
+    for chunk in whitespace(unescape(text(value))).split(';'):
+        remaining = chunk.strip()
+        while remaining:
+            end = label_at_start(remaining)
+            if end is None:
+                value, separator, remaining = remaining.partition(',')
+                if value.strip(): result.append(value.strip())
+                remaining = remaining.strip() if separator else ''
+                continue
+            suffix = remaining[end:]
+            if suffix.lstrip().startswith(','):
+                suffix = suffix.lstrip()
+            if suffix.startswith(','):
+                result.append(remaining[:end]); remaining = suffix[1:].strip()
+            elif not suffix:
+                result.append(remaining); break
+            else:
+                # Explanations can contain commas. A comma before another known
+                # choice starts a new selection; other commas stay in the detail.
+                boundary = next((match.start() for match in re.finditer(',',suffix)
+                                 if label_at_start(suffix[match.end():].strip()) is not None),None)
+                if boundary is None:
+                    result.append(remaining); break
+                result.append(remaining[:end+boundary]); remaining = suffix[boundary+1:].strip()
+    return result
 
 
 def count(value):
-    s = text(value)
+    s = whitespace(unescape(text(value)))
     if not s:
         return None, 'not_provided'
-    if s.casefold() in {'unknown','tbd','not available'}:
+    if s.casefold() in {'unknown','tbd','not available','n/a','na','none','not applicable'}:
         return None, 'unknown'
+    # Accept an explicitly stated count with notes, never a model version,
+    # numbered list, range, or an estimate such as "8+".
+    annotated = re.fullmatch(
+        r'(?:(?:ML/DL Models?|ML Models?|LLM)\s+Count\s*:\s*)?'
+        r'(\+?\d+(?:\.\d+)?)'
+        r'(?:\s+\([^\n]+\)\.?|\s*[-–—]\s*[A-Za-z][^\n]*|'
+        r',\s+[A-Za-z][^\n]*|\s+(?:LLMs?|models?))', s, re.I)
+    if annotated:
+        s = annotated[1]
     if isinstance(value, bool) or not re.fullmatch(r'\+?\d+(?:\.\d+)?', s):
         raise ValueError('A model count must be a whole number of 0 or greater.')
     try:
@@ -66,11 +118,11 @@ def parse_date(value):
         if len(y) == 2:
             year += 2000 if year <= 68 else 1900
         return date(year,int(m),int(d)).isoformat()
-    raise ValueError('Use YYYY-MM-DD, M/D/YYYY, M/D/YY, or an Excel date cell.')
+    raise ValueError('Use YYYY-MM-DD, M/D/YYYY, or M/D/YY.')
 
 
 def impact(value):
-    s = whitespace(value)
+    s = whitespace(unescape(text(value)))
     if s.casefold() == 'unknown':
         return dict.fromkeys(['member','regulatory','financial'], 'Unknown')
     result = {}
@@ -91,57 +143,65 @@ def impact(value):
 
 
 def hitl(value):
-    s = whitespace(value)
+    s = whitespace(unescape(text(value)))
     override = 'Unknown'
     # Override is extracted only as a named pair, never inferred from oversight.
     pair = re.search(r'\s*[,;]\s*Override(?: capability)?\s*[:= ]\s*(Yes|No|Unknown)\s*$', s, re.I)
     if pair:
         override = pair[1].title()
         s = s[:pair.start()]
-    elif re.search(r'\boverride\b', s, re.I):
-        raise ValueError('Use a named Override: Yes, No, or Unknown value.')
     oversight, detail = category(s, 'human_oversight')
     return oversight, override, detail
 
 
-def normalize(inputs, formulas=()):
+def normalize(inputs):
     product, problems = {}, []
     details = {}
     for field in config.FIELDS.values():
         value = inputs.get(field,'')
         product[field] = [] if field in config.MULTI else None
         try:
-            if field in formulas:
-                raise ValueError('Formula cells are not accepted; replace the formula with a literal value.')
             if field in config.COUNTS:
                 product[field],product[field+'_state'] = count(value)
             elif field in config.DATES:
                 product[field] = parse_date(value)
             elif field == 'impact':
-                product[field] = impact(value) if text(value) else None
+                try:
+                    product[field] = impact(value) if text(value) else None
+                except ValueError:
+                    # A combined profile or free-text response satisfies Q5.
+                    # Individual chart dimensions may remain unclassified.
+                    product[field] = text(value)
             elif field == 'human_oversight':
                 if text(value):
                     product[field],product['override_capability'],detail = hitl(value)
                     if detail and product[field] == 'Other': details[field] = detail
                 else:
                     product['override_capability'] = 'Unknown'
-                if product[field] == 'Other' and not details.get(field):
-                    raise ValueError('Other requires an explanation.')
             elif field in config.OPTIONS:
-                selections = [s.strip() for s in text(value).split(';') if s.strip()]
+                submitted = unescape(text(value))
+                if field in config.MULTI:
+                    selections = choice_selections(value,field)
+                elif field == 'deployment_status':
+                    selections = [s.strip() for s in submitted.split(';') if s.strip()]
+                else:
+                    selections = [submitted] if submitted else []
+                if text(value) and not selections:
+                    raise ValueError('Select at least one value; separators alone are not a selection.')
                 if field not in config.MULTI and len(selections) > 1:
                     raise ValueError('Select exactly one category.')
                 parsed = []
                 for selection in selections:
                     canonical,detail = category(selection,field)
-                    if canonical == 'Other':
-                        if not detail:
-                            raise ValueError('Other requires an explanation.')
+                    if canonical == 'Other' and detail:
                         details[field] = detail
                     if canonical not in parsed: parsed.append(canonical)
                 product[field] = parsed if field in config.MULTI else (parsed[0] if parsed else None)
             else:
                 product[field] = text(value)
+            if field in config.OPTIONS or field == 'impact':
+                if text(value) and not unescape(text(value)).strip(' ;,\t\r\n'):
+                    raise ValueError('Select at least one value; separators alone are not a selection.')
         except (ValueError, OverflowError) as exc:
             if field in config.COUNTS: product[field+'_state'] = 'not_provided'
             problems.append((field,str(exc)))

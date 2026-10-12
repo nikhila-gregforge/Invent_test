@@ -4,7 +4,7 @@ import os
 from io import BytesIO, StringIO
 import pytest
 from app import create_app
-from test_inventory import csv_file, valid_row, xlsx_file, stage, HEADERS, AS_OF, create_legacy_database
+from test_inventory import csv_file, dict_csv, export_csv, valid_row, stage, HEADERS, AS_OF, create_legacy_database
 
 HEAD = {'X-Requested-With':'AIInventory'}
 
@@ -17,7 +17,7 @@ def app(tmp_path,request):
 
 
 def upload(client,data=None,name='sample.csv',**kwargs):
-    data = data if data is not None else csv_file([valid_row(),valid_row('002',Q3='test'),valid_row('003',Q12='0')])
+    data = data if data is not None else csv_file([valid_row(),valid_row('002',Q3=''),valid_row('003',Q12='-1')])
     return client.post('/api/runs',data={'file':(BytesIO(data),name),**kwargs},headers=HEAD)
 
 
@@ -29,7 +29,7 @@ def test_direct_upload_review_detail_reports_and_restart(app):
     filtered=client.get('/api/runs/'+identifier+'?status=all&field=business_purpose').json
     assert filtered['matched']==1 and filtered['records'][0]['application_id']=='APP-002'
     detail=client.get(f'/api/runs/{identifier}/records/1').json
-    assert detail['record']['cells']['business_purpose']=='test' and detail['run']['id']==identifier
+    assert detail['record']['cells']['business_purpose']=='' and detail['run']['id']==identifier
     assert detail['record']['findings'][0]['fix']
     report=client.get(f'/api/runs/{identifier}/export?kind=errors&status=all&field=business_purpose')
     rows=list(csv.DictReader(StringIO(report.data.decode('utf-8-sig'))))
@@ -58,23 +58,77 @@ def test_template_rules_and_complete_header_feedback(app):
     assert client.post('/api/preview',headers=HEAD).status_code==404
 
 
-def test_xlsx_worksheet_selection_and_strict_headers(app):
+def test_vendor_contact_error_is_counted_once_and_source_filter_is_clear(app):
     client=app.test_client()
-    def several(wb): wb.copy_worksheet(wb.active).title='Second'
-    data=xlsx_file([valid_row()],several)
-    response=upload(client,data,'book.xlsx')
-    assert response.status_code==422 and response.json['sheets']==['Disclosure','Second']
-    first=upload(client,data,'book.xlsx',sheet='Disclosure').json['id']
-    second=upload(client,data,'book.xlsx',sheet='Second').json['id']
-    assert first!=second
-    def bad(wb): wb.active['A1']='Wrong ID heading'
-    assert upload(client,xlsx_file([valid_row()],bad),'bad.xlsx').json['columns']['missing']==[HEADERS[0]]
+    identifier=upload(client,csv_file([valid_row(Q9='Hybrid',Q8='N/A')])).json['id']
+    detail=client.get(f'/api/runs/{identifier}/records/0').json['record']
+    assert detail['errors']==1 and detail['affected_fields']==['vendor_owner']
+    assert detail['field_results']['ai_source']=='No errors'
+    assert detail['field_results']['vendor_owner']=='Error'
+    assert client.get(f'/api/runs/{identifier}?status=all&field=ai_source').json['matched']==0
+    assert client.get(f'/api/runs/{identifier}?status=all&field=vendor_owner').json['matched']==1
+    report=client.get(f'/api/runs/{identifier}/export?kind=errors&scope=all')
+    rows=list(csv.DictReader(StringIO(report.data.decode('utf-8-sig'))))
+    assert len(rows)==1 and rows[0]['Inventory fields']=='Vendor Owner'
+
+
+def test_delete_review_requires_same_origin_and_removes_all_saved_endpoints(app):
+    client=app.test_client()
+    first=upload(client).json['id']
+    second=upload(client,csv_file([valid_row('kept')])).json['id']
+    paths=[f'/api/runs/{first}',f'/api/runs/{first}/records/0',
+           f'/api/runs/{first}/analytics',f'/api/runs/{first}/export?kind=records']
+    for path in paths: assert client.get(path).status_code==200
+    assert client.delete(f'/api/runs/{first}').status_code==403
+    assert client.delete(f'/api/runs/{first}',headers={**HEAD,'Origin':'https://untrusted.example'}).status_code==403
+    assert len(client.get('/api/runs').json['runs'])==2
+    response=client.delete(f'/api/runs/{first}',headers={**HEAD,'Origin':'http://localhost'})
+    assert response.status_code==200 and response.json=={'deleted':first}
+    for path in paths: assert client.get(path).status_code==404
+    assert client.delete(f'/api/runs/{first}',headers=HEAD).status_code==404
+    assert [run['id'] for run in client.get('/api/runs').json['runs']]==[second]
+    assert client.get(f'/api/runs/{second}').status_code==200
+
+
+@pytest.mark.parametrize('app',[True],indirect=True)
+def test_archived_review_can_be_deleted_from_history(app):
+    client=app.test_client()
+    assert client.delete('/api/runs/old-run',headers=HEAD).status_code==200
+    assert client.get('/api/runs').json['runs']==[]
+    assert client.get('/api/runs/old-run').status_code==404
+
+
+@pytest.mark.parametrize('name',['book.xlsx','book.xls','inventory.ods','report.pdf','data.json',
+                                'inventory.txt','inventory.tsv','archive.zip','inventory','inventory.csv.xlsx'])
+def test_non_csv_uploads_are_rejected_without_saving(app,name):
+    client=app.test_client()
+    # Even valid CSV content cannot bypass the file-type restriction.
+    response=upload(client,csv_file([valid_row()]),name,sheet='Sheet1')
+    assert response.status_code==400
+    assert 'Only CSV files are accepted' in response.json['error']
+    assert not client.get('/api/runs').json['runs']
+
+
+@pytest.mark.parametrize('data',[b'PK\x03\x04not CSV',b'%PDF-1.7\nnot CSV',b'{"inventory": []}',
+                               ('\t'.join(HEADERS)+'\n').encode()])
+def test_non_csv_content_renamed_csv_is_rejected(app,data):
+    client=app.test_client()
+    response=upload(client,data,'renamed.csv')
+    assert response.status_code in {400,422}
+    assert not client.get('/api/runs').json['runs']
+
+
+def test_uppercase_csv_extension_and_missing_file(app):
+    client=app.test_client()
+    assert upload(client,csv_file([valid_row()]),'INVENTORY.CSV').status_code==201
+    response=client.post('/api/runs',headers=HEAD)
+    assert response.status_code==400 and response.json['error']=='Choose a CSV file.'
 
 
 def test_read_only_routes_headers_origins_and_error_privacy(app,caplog,monkeypatch):
     client=app.test_client()
     html=client.get('/'); assert html.status_code==200 and b'streamlit' not in html.data.lower()
-    for path in ['/assets/app.js','/assets/style.css','/assets/centene-logo.jpg']:
+    for path in ['/assets/app.js','/assets/charts.js','/assets/style.css','/assets/centene-logo.jpg']:
         response=client.get(path); assert response.status_code==200 and response.headers['X-Content-Type-Options']=='nosniff'
     for path in ['/','/assets/app.js','/assets/style.css']:
         text=client.get(path).data.decode().lower()
@@ -149,6 +203,93 @@ def choose_upload(page,data,name='sample.csv'):
     page.locator('#upload-submit').click()
 
 
+def test_browser_delete_review_cancel_retry_persistence_and_empty_state(browser_app,app):
+    from playwright.sync_api import expect
+    first=stage(app.extensions['store'],csv_file([valid_row()]),'first.csv')
+    second=stage(app.extensions['store'],csv_file([valid_row('002')]),'second.csv')
+    page,context,base,errors=browser_app; page.goto(base)
+    first_row=page.locator(f'#history tr[data-run-id="{first}"]')
+    first_row.locator('.record-open').click()
+    expect(page.locator('#review-content')).to_be_visible()
+    page.locator('#home-button').click()
+    first_row.locator('.review-delete').click()
+    expect(page.locator('#delete-dialog')).to_be_visible()
+    expect(page.locator('#delete-message')).to_contain_text('first.csv')
+    expect(page.locator('#delete-cancel')).to_be_focused()
+    page.locator('#delete-cancel').click()
+    expect(page.locator('#history tr')).to_have_count(2)
+    assert len(app.extensions['store'].runs())==2
+    first_row.locator('.review-delete').click()
+    failed=f'**/api/runs/{first}'
+    page.route(failed,lambda route:route.fulfill(status=503,json={'error':'Could not delete this review. Retry.'}))
+    page.locator('#delete-confirm').click()
+    expect(page.locator('#delete-error')).to_have_text('Could not delete this review. Retry.')
+    assert len(app.extensions['store'].runs())==2
+    expect(page.locator('#delete-confirm')).to_be_enabled()
+    page.unroute(failed)
+    page.locator('#delete-confirm').click()
+    expect(page.locator('#delete-dialog')).not_to_be_visible()
+    expect(page.locator('#history tr')).to_have_count(1)
+    expect(page.locator('#history')).to_contain_text('second.csv')
+    assert page.evaluate("sessionStorage.getItem('inventory-review-4')") is None
+    page.reload(); expect(page.locator('#history tr')).to_have_count(1)
+    page.set_viewport_size({'width':390,'height':844})
+    page.locator('.review-delete').click()
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    page.locator('#delete-confirm').click()
+    expect(page.locator('#home-empty')).to_be_visible()
+    expect(page.locator('.upload-trigger')).to_be_focused()
+    assert app.extensions['store'].runs()==[]
+    page.reload(); expect(page.locator('#home-empty')).to_be_visible()
+
+
+def test_browser_vendor_message_is_not_repeated_under_source(browser_app):
+    from playwright.sync_api import expect
+    page,context,base,errors=browser_app
+    page.goto(base)
+    choose_upload(page,csv_file([
+        valid_row('vendor',Q9='Hybrid',Q8='N/A'),
+        valid_row('platform',Q9='Copilot Studio',Q8='N/A'),
+    ]))
+    expect(page.locator('#summary')).to_have_text('Total records2Records with errors1Passed1')
+    page.locator('#records .record-open').click()
+    expect(page.locator('#record-content')).to_be_visible()
+    vendor=page.locator('[data-field="vendor_owner"]')
+    source=page.locator('[data-field="ai_source"]')
+    expect(vendor).to_have_class('field-error')
+    expect(vendor).to_contain_text('The selected source indicates vendor involvement')
+    expect(vendor).to_contain_text('Enter the vendor contact’s name or email')
+    expect(source).not_to_have_class('field-error')
+    expect(source).to_contain_text('No errors')
+    expect(source.locator('.field-issue')).to_have_count(0)
+    expect(page.locator('#source-values .field-issue')).to_have_count(1)
+    page.locator('#back-to-results').click()
+    page.locator('#status').select_option('Passed')
+    expect(page.locator('#records tr')).to_have_count(1)
+    page.locator('#records .record-open').click()
+    expect(page.locator('#record-title')).to_have_text('Synthetic assistant platform')
+    expect(page.locator('#source-values .field-issue')).to_have_count(0)
+    expect(page.locator('[data-field="ai_source"] .field-value')).to_have_text('Copilot Studio')
+
+
+def test_browser_lifecycle_is_visible_unvalidated_and_escaped(browser_app):
+    from playwright.sync_api import expect
+    page,context,base,errors=browser_app
+    page.goto(base)
+    raw=dict(zip(HEADERS,valid_row().values()))
+    lifecycle='Draft <img src=x onerror="window.injected=1">'
+    raw['Lifecycle']=lifecycle
+    choose_upload(page,dict_csv([raw]))
+    expect(page.locator('#records tr')).to_have_count(1)
+    page.locator('#records .record-open').click()
+    source=page.locator('[data-source-column="Lifecycle"]')
+    expect(source.locator('.field-value')).to_have_text(lifecycle)
+    expect(source).to_contain_text('Not validated')
+    expect(source.locator('button, img')).to_have_count(0)
+    expect(page.locator('#record-status')).to_contain_text('0 errors')
+    assert page.evaluate('window.injected') is None
+
+
 def test_browser_direct_upload_errors_and_download(browser_app,app):
     from playwright.sync_api import expect
     page,context,base,errors=browser_app; page.goto(base)
@@ -157,7 +298,7 @@ def test_browser_direct_upload_errors_and_download(browser_app,app):
     with page.expect_download() as downloaded: page.locator('#upload-dialog a[download]').click()
     assert list(csv.reader(StringIO(downloaded.value.path().read_text(encoding='utf-8-sig'))))==[HEADERS]
     page.locator('[data-close="upload-dialog"]').click()
-    data=csv_file([valid_row(),valid_row('002',Q3='test'),valid_row('003',Q12='0')])
+    data=csv_file([valid_row(),valid_row('002',Q3=''),valid_row('003',Q12='-1')])
     choose_upload(page,data)
     expect(page.locator('#review-content')).to_be_visible(); expect(page.locator('#records tr')).to_have_count(2)
     expect(page.locator('#summary')).to_have_text('Total records3Records with errors2Passed1')
@@ -165,12 +306,12 @@ def test_browser_direct_upload_errors_and_download(browser_app,app):
     page.locator('#field').select_option('business_purpose'); expect(page.locator('#records tr')).to_have_count(1)
     page.locator('#records tr td').nth(2).click(); expect(page.locator('#record-content')).to_be_visible()
     expect(page.locator('[data-field="business_purpose"]')).to_have_class('field-error')
-    expect(page.locator('[data-field="business_purpose"] .field-value')).to_have_text('test')
+    expect(page.locator('[data-field="business_purpose"] .field-value')).to_have_text('(blank)')
     expect(page.locator('[data-field="business_purpose"]')).to_contain_text('How to fix: Describe what the system does')
     expect(page.locator('#record-view input, #record-view textarea, #record-view select, #record-view [contenteditable]')).to_have_count(0)
     page.locator('[data-field="business_owner_email"] button').click()
-    expect(page.locator('#rules-list')).to_contain_text('person’s name')
-    expect(page.locator('#rules-list')).to_contain_text('any domain is allowed')
+    expect(page.locator('#rules-list')).to_contain_text('@centene.com')
+    expect(page.locator('#rules-list')).to_contain_text('Multiple addresses and surrounding text are accepted')
     page.locator('[data-close="rules-dialog"]').click()
     page.locator('#back-to-results').click(); expect(page.locator('#field')).to_have_value('business_purpose')
     expect(page.locator('#records .record-open')).to_be_focused()
@@ -197,11 +338,19 @@ def test_browser_direct_upload_errors_and_download(browser_app,app):
     assert len(app.extensions['store'].runs())==2
 
 
-def test_browser_header_failures_reupload_and_worksheets(browser_app,app):
+def test_browser_csv_only_header_failures_and_reupload(browser_app,app):
     from playwright.sync_api import expect
     page,context,base,errors=browser_app; page.goto(base)
+    choose_upload(page,csv_file([valid_row()]),'book.xlsx')
+    expect(page.locator('#file')).to_have_attribute('accept','.csv')
+    expect(page.locator('#file-limits')).to_contain_text('CSV only')
+    expect(page.locator('#upload-error')).to_contain_text('Only CSV files are accepted')
+    expect(page.locator('#upload-dialog')).to_be_visible()
+    assert not app.extensions['store'].runs()
     headers=HEADERS.copy(); headers[0]='Application ID'; headers[1]='<img src=x onerror="window.injected=1">'
-    choose_upload(page,csv_file([valid_row()],headers))
+    page.locator('#file').set_input_files({'name':'headers.csv','mimeType':'text/csv','buffer':csv_file([valid_row()],headers)})
+    expect(page.locator('#upload-error')).to_be_hidden()
+    page.locator('#upload-submit').click()
     expect(page.locator('#header-errors')).to_be_visible()
     expect(page.locator('#header-errors')).to_contain_text('Missing columns')
     expect(page.locator('#header-errors')).to_contain_text('Unexpected columns')
@@ -214,22 +363,19 @@ def test_browser_header_failures_reupload_and_worksheets(browser_app,app):
     expect(page.locator('#header-errors')).to_be_hidden()
     page.locator('#upload-submit').click(); expect(page.locator('#records tr')).to_have_count(1)
     page.locator('#records .record-open').click(); expect(page.locator('#record-content')).to_be_visible()
-    expect(page.locator('[data-field="business_owner_email"]')).to_contain_text('person’s name')
+    expect(page.locator('[data-field="business_owner_email"]')).to_contain_text('@centene.com')
     expect(page.locator('[data-field="llm_count"]')).to_contain_text('How to fix: Count the actual models used')
     expect(page.locator('#not-checked')).to_be_visible()
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
     page.set_viewport_size({'width':1440,'height':1000})
-    def several(wb): wb.copy_worksheet(wb.active).title='Second'
-    choose_upload(page,xlsx_file([valid_row()],several),'book.xlsx')
-    expect(page.locator('#sheet-label')).to_be_visible()
-    page.locator('#sheet').select_option('Second'); page.locator('#upload-submit').click()
-    expect(page.locator('#run-meta')).to_contain_text('Second'); expect(page.locator('#summary .passed')).to_have_text('Passed1')
+    choose_upload(page,csv_file([valid_row()]),'corrected.CSV')
+    expect(page.locator('#summary .passed')).to_have_text('Passed1')
 
 
 def test_browser_record_navigation_retry_and_html_safety(browser_app,app):
     from playwright.sync_api import expect
     page,context,base,errors=browser_app
-    rows=[valid_row(str(i).zfill(3),Q3='test') for i in range(1,31)]
+    rows=[valid_row(str(i).zfill(3),Q3='') for i in range(1,31)]
     literal='<img src=x onerror="window.injected=1">'; rows[25]['Q2']=literal
     identifier=stage(app.extensions['store'],csv_file(rows),'browser.csv')
     page.goto(base+f'/#run/{identifier}'); expect(page.locator('#records tr')).to_have_count(25)
@@ -264,14 +410,58 @@ def test_browser_record_navigation_retry_and_html_safety(browser_app,app):
 def test_browser_archive_notice_preserves_historical_meaning(browser_app,app):
     from playwright.sync_api import expect
     page,context,base,errors=browser_app; page.goto(base)
-    expect(page.locator('#history')).to_contain_text('Previous rules · Upload again')
+    expect(page.locator('#history')).to_contain_text('Upload again to review')
     expect(page.locator('#history .badge')).to_have_count(0)
     page.locator('#history tr').click(); expect(page.locator('#archived-review')).to_be_visible()
     expect(page.locator('#archived-message')).to_contain_text('original upload and results are preserved')
     expect(page.locator('#review-content')).to_be_hidden(); expect(page.locator('#download-open')).to_be_disabled()
     page.goto(base+'/#run/old-run/record/0'); expect(page.locator('#record-error')).to_be_visible()
     expect(page.locator('#record-retry')).to_be_hidden()
-    choose_upload(page,csv_file([valid_row(Q6='owner@example.com',Q20='Unknown')]))
+    choose_upload(page,csv_file([valid_row(Q6='owner@centene.com',Q20='Unknown')]))
     expect(page.locator('#summary .passed')).to_have_text('Passed1')
     expect(page.locator('#records')).to_contain_text('Passed')
     page.locator('#home-button').click(); expect(page.locator('#history tr')).to_have_count(2)
+
+
+def test_browser_charts_scopes_counts_and_export_layout(browser_app,app):
+    from pathlib import Path
+    from playwright.sync_api import expect
+    page,context,base,errors=browser_app; page.goto(base)
+    rows=[valid_row('1',Q20='High',Q18='Medicaid, Medicare',Q3=''),
+          valid_row('2',Q20='Medium',Q18='Medicare',Q16='Pilot',Q17=''),
+          valid_row('3',Q20='Unknown',Q18='Commercial',Q16='Development',Q17='')]
+    choose_upload(page,export_csv(rows),'Centene AI Inventory.csv')
+    expect(page.locator('#inventory-error-count')).to_contain_text('Result: 1 of 3 records')
+    expect(page.locator('#charts-content')).to_be_visible()
+    expect(page.locator('#charts-context')).to_contain_text('Entire file · 3 application records')
+    expect(page.locator('#primary-charts article')).to_have_count(3)
+    risk=page.locator('[data-chart="risk_tier"]')
+    expect(risk).to_contain_text('33.3%'); expect(risk).to_contain_text('Unknown')
+    lob=page.locator('[data-chart="lines_of_business"]')
+    expect(lob.locator('.chart-bars')).to_be_visible()
+    expect(lob.locator('.pie-chart')).to_have_count(0)
+    expect(lob).to_contain_text('3 records · % of records')
+    expect(lob).to_contain_text('2 · 66.7%')
+    expect(lob).not_to_contain_text('% of selections')
+    screenshot_dir=os.getenv('AI_INVENTORY_SCREENSHOT_DIR')
+    if screenshot_dir:
+        destination=Path(screenshot_dir); destination.mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(destination/'inventory-overview-desktop.png'),full_page=True)
+    page.locator('#more-charts summary').click()
+    page.locator('#extra-chart-field').select_option('ai_types')
+    expect(page.locator('#extra-chart .chart-bars')).to_be_visible()
+    expect(page.locator('#extra-chart')).to_contain_text('3 · 100%')
+    page.locator('#chart-scope').select_option('filtered')
+    expect(page.locator('#charts-context')).to_contain_text('Current filters, across all pages · 1 application records')
+    expect(risk).to_contain_text('100%')
+    page.locator('#clear-filters').click()
+    expect(page.locator('#charts-context')).to_contain_text('Current filters, across all pages · 3 application records')
+    page.set_viewport_size({'width':390,'height':844})
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    if screenshot_dir: page.screenshot(path=str(destination/'inventory-overview-mobile.png'),full_page=True)
+    page.locator('#search').fill('no-such-record')
+    expect(page.locator('#charts-context')).to_contain_text('0 application records')
+    expect(page.locator('#primary-charts .chart-empty')).to_have_count(3)
+    expect(page.locator('#primary-charts')).not_to_contain_text('NaN')
+    page.locator('#chart-scope').select_option('all')
+    expect(page.locator('#charts-context')).to_contain_text('Entire file · 3 application records')

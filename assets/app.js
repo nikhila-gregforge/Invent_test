@@ -13,8 +13,8 @@ const display = value => {
   return String(value);
 };
 const defaults = () => ({status: 'Errors', field: '', q: '', page: 1, size: 25});
-const state = {runs: [], id: null, filters: defaults(), data: null, autoStatus: true, view: '', record: null, recordRun: null, recordKey: null, fields: [], rulesFields: [], rulesVersion: '',
-  sequence: 0, busy: false, loading: false, controller: null, returnKey: null};
+const state = {runs: [], id: null, filters: defaults(), data: null, autoStatus: true, view: '', record: null, recordRun: null, recordKey: null, fields: [], rulesFields: [],
+  sequence: 0, busy: false, loading: false, controller: null, returnKey: null, deleteRun: null};
 let searchTimer;
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
 function badge(status, label) {
@@ -77,7 +77,7 @@ async function loadHistory() {
   $('home-loading').hidden = false;
   try {
     const data = await api('/api/runs'); state.runs = data.runs;
-    $('file-limits').textContent = 'CSV or XLSX · '+data.max_bytes/1024/1024+' MiB · '+data.max_rows.toLocaleString()+' records';
+    $('file-limits').textContent = 'CSV only · '+data.max_bytes/1024/1024+' MiB · '+data.max_rows.toLocaleString()+' records';
     renderHistory();
   }
   catch (error) { notice(error.message); }
@@ -93,28 +93,65 @@ function renderHistory() {
   $('history-wrap').hidden = !state.runs.length; $('home-empty').hidden = !!state.runs.length;
   for (const run of state.runs) {
     const row = node('tr'), name = node('td');
-    name.append(clickableRow(row, run.filename, () => navigate('#run/'+run.id)),
-      node('div', (run.sheet ? run.sheet+' · ' : '')+'Rules '+run.rules_version, 'record-id'));
+    row.dataset.runId = run.id;
+    name.append(clickableRow(row, run.filename, () => navigate('#run/'+run.id)));
+    if (run.sheet) name.append(node('div',run.sheet,'record-id'));
     const results = node('td'), chips = node('div',undefined,'history-results');
-    if (run.archived) chips.append(node('span','Previous rules · Upload again','muted small'));
+    if (run.archived) chips.append(node('span','Upload again to review','muted small'));
     for (const [status, count] of run.archived ? [] : [['Errors',run.errors],['Passed',run.passed]]) {
       if (count) chips.append(badge(status, count.toLocaleString()+(status === 'Errors' ? ' with errors' : ' passed')));
     }
     results.append(chips);
     row.append(name, node('td',run.total.toLocaleString(),'numeric'), results, node('td',dateLabel(run.created_at),'small muted'));
+    const actions = node('td',undefined,'history-actions');
+    const remove = button('Delete',event => { event.stopPropagation(); openDelete(run); },'danger review-delete');
+    remove.setAttribute('aria-label','Delete review '+run.filename);
+    remove.disabled = state.busy; actions.append(remove); row.append(actions);
     $('history').append(row);
   }
 }
 function setBusy(busy) {
   state.busy = busy;
-  for (const el of document.querySelectorAll('.upload-trigger, #home-button, #upload-dialog button, #upload-dialog input, #upload-dialog select')) el.disabled = busy;
+  for (const el of document.querySelectorAll('.upload-trigger, #home-button, #upload-dialog button, #upload-dialog input, #upload-dialog select, .review-delete, #delete-dialog button')) el.disabled = busy;
 }
+function openDelete(run) {
+  if (state.busy) return;
+  state.deleteRun = run;
+  $('delete-message').textContent = 'Delete the saved review and uploaded copy for “'+run.filename+'”?';
+  $('delete-error').hidden = true;
+  $('delete-dialog').showModal();
+  $('delete-cancel').focus();
+}
+$('delete-dialog').addEventListener('cancel',event => { if (state.busy) event.preventDefault(); });
+$('delete-dialog').addEventListener('close',() => { state.deleteRun = null; });
+$('delete-confirm').addEventListener('click',async () => {
+  if (state.busy || !state.deleteRun) return;
+  const id = state.deleteRun.id;
+  $('delete-error').hidden = true; setBusy(true); $('delete-confirm').textContent = 'Deleting…';
+  try {
+    await api('/api/runs/'+encodeURIComponent(id),{method:'DELETE',headers:{'X-Requested-With':'AIInventory'}});
+    state.runs = state.runs.filter(run => run.id !== id);
+    if (state.id === id) {
+      state.id = null; state.data = null; state.record = null; state.recordRun = null;
+      state.recordKey = null; state.fields = []; state.returnKey = null;
+    }
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('inventory-review-4'));
+      if (saved && saved.id === id) sessionStorage.removeItem('inventory-review-4');
+    } catch { /* Storage is optional. */ }
+    setBusy(false); $('delete-dialog').close(); renderHistory();
+    const next = $('history').querySelector('.record-open') || document.querySelector('.upload-trigger');
+    next.focus();
+  } catch (error) {
+    $('delete-error').textContent = error.message; $('delete-error').hidden = false;
+  } finally { setBusy(false); $('delete-confirm').textContent = 'Delete review'; }
+});
 function clearUploadErrors() {
   $('upload-error').hidden = true; $('header-errors').hidden = true; $('header-errors').replaceChildren();
 }
 function openUpload() {
   if (state.busy) return;
-  $('upload-form').reset(); $('sheet-label').hidden = true; $('sheet').replaceChildren();
+  $('upload-form').reset();
   clearUploadErrors(); $('upload-progress').hidden = true; $('upload-dialog').showModal();
 }
 function showHeaderErrors(columns) {
@@ -134,10 +171,15 @@ function showHeaderErrors(columns) {
 $('upload-form').addEventListener('submit', async event => {
   event.preventDefault(); if (state.busy) return;
   const file = $('file').files[0]; if (!file) return;
-  clearUploadErrors(); $('upload-progress').hidden = false; setBusy(true);
+  clearUploadErrors();
+  if (!/\.csv$/i.test(file.name)) {
+    $('upload-error').textContent = 'Only CSV files are accepted. Export your inventory as a .csv file and upload it again.';
+    $('upload-error').hidden = false;
+    return;
+  }
+  $('upload-progress').hidden = false; setBusy(true);
   try {
     const form = new FormData(); form.append('file',file);
-    if (!$('sheet-label').hidden) form.append('sheet',$('sheet').value);
     const result = await api('/api/runs',{method:'POST',body:form,headers:{'X-Requested-With':'AIInventory'}});
     $('upload-dialog').close(); setBusy(false);
     state.id = result.id; state.filters = defaults(); state.autoStatus = true;
@@ -146,13 +188,9 @@ $('upload-form').addEventListener('submit', async event => {
   } catch (error) {
     $('upload-error').textContent = error.message; $('upload-error').hidden = false;
     if (error.data && error.data.columns) showHeaderErrors(error.data.columns);
-    if (error.data && error.data.sheets) {
-      $('sheet-label').hidden = false;
-      $('sheet').replaceChildren(...error.data.sheets.map(sheet => option(sheet,sheet)));
-    }
   } finally { setBusy(false); $('upload-progress').hidden = true; }
 });
-$('file').addEventListener('change', () => { $('sheet-label').hidden = true; $('sheet').replaceChildren(); clearUploadErrors(); });
+$('file').addEventListener('change', clearUploadErrors);
 function query() { return new URLSearchParams(state.filters); }
 function syncFilters() {
   if (document.activeElement !== $('search')) $('search').value = state.filters.q;
@@ -160,6 +198,7 @@ function syncFilters() {
 }
 async function loadResults(focus = false) {
   const {sequence,signal} = beginRequest(); const id = state.id;
+  resetCharts();
   $('review-content').hidden = !state.data || state.data.run.id !== id;
   notice(); state.data = null; $('review-rules').disabled = true; $('archived-review').hidden = true; $('run-meta').textContent = '';
   state.loading = true; $('results-loading').hidden = false; $('download-open').disabled = true;
@@ -183,7 +222,7 @@ async function loadResults(focus = false) {
     if (isCurrent(sequence,'review') && error.name !== 'AbortError') {
       if (error.data && error.data.archived) {
         $('filename').textContent = error.data.run.filename;
-        $('run-meta').textContent = 'Previous rules · '+error.data.run.rules_version;
+        $('run-meta').textContent = 'Reviewed '+dateLabel(error.data.run.created_at);
         $('archived-message').textContent = error.message; $('archived-review').hidden = false;
       } else notice(error.message);
     }
@@ -194,8 +233,9 @@ function renderResults() {
   const data = state.data, run = data.run;
   $('review-content').hidden = false;
   $('filename').textContent = run.filename;
-  $('run-meta').textContent = (run.sheet ? run.sheet+' · ' : '')+'Reviewed '+dateLabel(run.created_at)+' · Rules '+run.rules_version;
+  $('run-meta').textContent = (run.sheet ? run.sheet+' · ' : '')+'Reviewed '+dateLabel(run.created_at);
   $('summary').replaceChildren();
+  $('inventory-error-count').textContent = 'Result: '+data.inventory_error_records.toLocaleString()+' of '+run.total.toLocaleString()+' records have an entry error in at least one of the 21 inventory fields. Each record is counted once. Overall totals also include Submitter Name and Date Submitted checks.';
   for (const [label,count,status,cls] of [['Total records',run.total,'all',''],['Records with errors',run.errors,'Errors','errors'],['Passed',run.passed,'Passed','passed']]) {
     const el = button(label,() => changeFilter('status',status),cls+(state.filters.status === status ? ' selected' : ''));
     el.setAttribute('aria-pressed',String(state.filters.status === status)); el.append(node('strong',count.toLocaleString())); $('summary').append(el);
@@ -219,6 +259,7 @@ function renderResults() {
   $('record-count').textContent = data.matched ? start+'–'+Math.min(data.page*data.size,data.matched)+' of '+data.matched.toLocaleString()+' records' : '0 records';
   $('page-info').textContent = 'Page '+data.page+' of '+data.pages;
   $('previous').disabled = data.page <= 1; $('next').disabled = data.page >= data.pages;
+  loadCharts();
 }
 function changeFilter(key,value) { state.autoStatus = false; clearTimeout(searchTimer); state.filters[key] = value; state.filters.page = 1; rememberFilters(); loadResults(); }
 function resetFilters() { state.autoStatus = false; clearTimeout(searchTimer); state.filters = {...defaults(),status:'all'}; rememberFilters(); loadResults(); }
@@ -241,7 +282,7 @@ async function loadRecord() {
     const data = await api('/api/runs/'+state.id+'/records/'+state.recordKey,{signal});
     if (!isCurrent(sequence,'record')) return;
     state.record = data.record; state.recordRun = data.run; state.fields = data.fields;
-    $('record-file').textContent = data.run.filename+' · Rules '+data.run.rules_version;
+    $('record-file').textContent = data.run.filename;
     renderRecord(); $('record-rules').disabled = false;
   } catch (error) {
     if (isCurrent(sequence,'record') && error.name !== 'AbortError') {
@@ -277,6 +318,14 @@ function renderRecord() {
     }
     row.append(label,value,validation); $('source-values').append(row);
   }
+  for (const [column, submitted] of Object.entries(record.extra_values || {})) {
+    const row = node('tr'); row.dataset.sourceColumn = column;
+    const label = node('td',undefined,'source-label'); label.append(node('strong',column));
+    const value = node('td');
+    value.append(node('span','Submitted value','value-caption'),node('div',display(submitted) || '(blank)','field-value'));
+    row.append(label,value,node('td','Source data · Not validated','muted'));
+    $('source-values').append(row);
+  }
   const unchecked = record.not_checked || [];
   $('not-checked').hidden = !unchecked.length; $('not-checked').open = false;
   $('not-checked-title').textContent = unchecked.length+' checks depend on errors above'; $('not-checked-list').replaceChildren();
@@ -285,9 +334,7 @@ function renderRecord() {
 }
 function openRules(selected = '') {
   state.rulesFields = state.fields;
-  const run = state.view === 'record' ? state.recordRun : state.data && state.data.run.id === state.id ? state.data.run : state.runs.find(r => r.id === state.id);
-  state.rulesVersion = run ? run.rules_version : '';
-  $('rules-meta').textContent = (state.rulesVersion ? 'Rules '+state.rulesVersion+' · ' : '')+'Correct errors in the source file and upload again.';
+  $('rules-meta').textContent = 'Correct errors in the source file and upload again.';
   $('rules-field').replaceChildren(option('','All inventory fields'),...state.rulesFields.map(f => option(f.id,f.label)));
   $('rules-field').value = selected; renderRules(); $('rules-dialog').showModal();
 }
@@ -299,7 +346,7 @@ function renderRules() {
     if (field.format) section.append(node('p',field.format,'format'));
     if (field.example) section.append(node('p','Example: '+field.example,'small muted'));
     if (field.options && field.options.length) {
-      const choices = node('details',undefined,'rule-choices'); choices.append(node('summary','Accepted choices'),node('p',field.options.join(' · ')));
+      const choices = node('details',undefined,'rule-choices'); choices.append(node('summary','Common choices and examples'),node('p',field.options.join(' · ')));
       if (field.aliases && Object.keys(field.aliases).length) choices.append(node('p','Also accepted: '+Object.entries(field.aliases).map(([a,b]) => a+' → '+b).join('; ')));
       section.append(choices);
     }
@@ -332,4 +379,5 @@ for (const el of document.querySelectorAll('.upload-trigger')) el.addEventListen
 for (const el of document.querySelectorAll('[data-close]')) el.addEventListener('click',() => { if (!state.busy) $(el.dataset.close).close(); });
 $('upload-dialog').addEventListener('cancel',event => { if (state.busy) event.preventDefault(); });
 window.addEventListener('hashchange',route);
+initializeCharts();
 (async () => { await loadHistory(); await route(); })();
