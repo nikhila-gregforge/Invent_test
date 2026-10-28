@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-RULES_VERSION = '5.3'
+RULES_VERSION = '5.4'
 SCHEMA_VERSION = 'inventory-1'
 MAX_BYTES = int(os.getenv('AI_INVENTORY_MAX_BYTES', 10 * 1024 * 1024))
 MAX_ROWS = int(os.getenv('AI_INVENTORY_MAX_ROWS', 10000))
@@ -99,8 +99,8 @@ FIELD_DESCRIPTIONS = {
     'application_id':'The identifier of the application or AI system. Not Available and Unknown are accepted when the ID is unavailable.',
     'system_name':'The actual name of the AI system or solution.',
     'business_purpose':'What the system does, who it serves, and why it is used.',
-    'business_owner_email':'The person accountable for business use. A name or Centene email is accepted, with optional roles, notes or multiple contacts.',
-    'technical_owner_email':'The person accountable for technical operation. A name or Centene email is accepted, with optional roles, notes or multiple contacts.',
+    'business_owner_email':'The person accountable for business use. A name or valid email from any domain is accepted, with optional roles, notes or multiple contacts.',
+    'technical_owner_email':'The person accountable for technical operation. A name or valid email from any domain is accepted, with optional roles, notes or multiple contacts.',
     'vendor_owner':'The vendor contact’s name or email, required when the source identifies a vendor-built, licensed, purchased or hybrid solution.',
     'ai_source':'How the system was acquired or developed. A platform name alone does not establish vendor involvement.',
     'ai_types':'The AI technologies the system actually uses.',
@@ -128,7 +128,7 @@ FIELD_EXAMPLES = {
 
 def field_definition(field):
     if field in {'technical_owner_email','business_owner_email'}:
-        format_hint='An owner name or valid @centene.com email. Multiple contacts and surrounding notes are accepted.'
+        format_hint='An owner name or valid email address from any domain. Multiple contacts and surrounding notes are accepted.'
     elif field == 'application_id':
         format_hint='A unique application ID, or Not Available / Unknown when the ID is unavailable.'
     elif field in COUNTS:

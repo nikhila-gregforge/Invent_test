@@ -1,90 +1,496 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark"><title>AI Inventory · Centene</title>
-  <link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/style.css?v=review-delete">
-  <script src="/assets/charts.js?v=inventory-5.3" defer></script>
-  <script src="/assets/app.js?v=review-actions" defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AI Inventory · Centene</title>
+
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/style.css?v=product-percentages-1">
+
+<script src="/assets/charts.js?v=product-percentages-1" defer></script>
+<script src="/assets/chart-actions.js?v=product-percentages-1" defer></script>
+<script src="/assets/app.js?v=product-percentages-1" defer></script>
 </head>
+
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
+
 <header class="app-header">
-  <div class="brand"><img src="/assets/centene-logo.jpg" alt="Centene" width="142" height="35"><div><strong>AI Governance Team</strong><span>Inventory review</span></div></div>
-  <nav aria-label="Main navigation"><button id="home-button" class="quiet" type="button">Reviews</button><button class="primary upload-trigger" type="button">Upload file</button></nav>
+  <div class="brand">
+    <img
+      src="/assets/centene-logo.jpg"
+      alt="Centene"
+      width="142"
+      height="35"
+    >
+    <div>
+      <strong>AI Governance Team</strong>
+      <span>Inventory review</span>
+    </div>
+  </div>
+
+  <nav aria-label="Main navigation">
+    <button id="home-button" class="quiet" type="button">
+      Reviews
+    </button>
+    <button class="primary upload-trigger" type="button">
+      Upload file
+    </button>
+  </nav>
 </header>
+
 <main id="main" tabindex="-1">
   <div id="notice" class="notice" role="alert" hidden></div>
+
   <section id="home-view" aria-labelledby="home-title">
-    <div class="page-heading"><h1 id="home-title">Inventory reviews</h1></div>
-    <p id="home-loading" class="muted" role="status">Loading reviews…</p>
-    <div id="home-empty" class="empty-state" hidden><h2>No reviews yet</h2><p>Upload an inventory file to start a review.</p></div>
-    <div id="history-wrap" class="table-scroll" hidden><table class="history-table"><thead><tr><th>File</th><th>Records</th><th>Results</th><th>Reviewed</th><th>Actions</th></tr></thead><tbody id="history"></tbody></table></div>
-  </section>
-  <section id="review-view" aria-labelledby="filename" hidden>
-    <div class="page-heading"><div><h1 id="filename" tabindex="-1"></h1><p id="run-meta" class="muted small"></p></div><div class="actions"><button id="review-rules" class="quiet" type="button">View validation rules</button><button id="download-open" type="button">Download report</button></div></div>
-    <div id="archived-review" class="archive-notice" hidden><p id="archived-message"></p><a href="/api/template" download>Download inventory template</a></div>
-    <p id="results-loading" class="muted small" role="status" hidden>Loading records…</p>
-    <div id="review-content" hidden>
-    <div id="summary" class="summary" aria-label="Results for the entire file"></div>
-    <p id="inventory-error-count" class="inventory-result" role="status"></p>
-    <section class="inventory-charts" aria-labelledby="charts-title">
-      <div class="charts-heading"><div><h2 id="charts-title">Inventory overview</h2><p id="charts-context" class="small muted"></p></div><label>Chart scope<select id="chart-scope"><option value="all">Entire file</option><option value="filtered">Current view · all pages</option></select></label></div>
-      <p id="charts-loading" class="small muted" role="status" hidden>Loading charts…</p>
-      <div id="charts-error" hidden><p id="charts-error-message" class="error-text" role="alert"></p><button id="charts-retry" type="button">Retry charts</button></div>
-      <div id="charts-content" hidden>
-        <div id="primary-charts" class="chart-grid"></div>
-        <details id="more-charts" class="more-charts"><summary>Explore more inventory fields</summary><label>Visualize<select id="extra-chart-field"></select></label><div id="extra-chart"></div></details>
-      </div>
-    </section>
-    <section class="filters" aria-label="Filter records">
-      <label class="search-label">Search<input id="search" type="search" placeholder="Name, ID or owner" autocomplete="off"></label>
-      <label>Status<select id="status"><option value="all">All records</option><option value="Errors">Errors</option><option value="Passed">Passed</option></select></label>
-      <label>Errors in field<select id="field"><option value="">All fields</option></select></label>
-      <button id="clear-filters" class="quiet" type="button">Clear filters</button>
-    </section>
-    <div class="table-scroll"><table class="records-table"><thead><tr><th>Record</th><th>Status</th><th>Error count</th><th>Affected fields</th></tr></thead><tbody id="records"></tbody></table></div>
-    <div id="no-results" class="empty-state" hidden><h2>No records in this view</h2><button id="show-all" type="button">Show all records</button></div>
-    <footer class="pagination"><span id="record-count" role="status"></span><div><span id="page-info"></span><button id="previous" type="button" aria-label="Previous page">←</button><button id="next" type="button" aria-label="Next page">→</button></div></footer>
+    <div class="page-heading">
+      <h1 id="home-title">Inventory reviews</h1>
+    </div>
+
+    <p id="home-loading" class="muted" role="status">
+      Loading reviews…
+    </p>
+
+    <div id="home-empty" class="empty-state" hidden>
+      <h2>No reviews yet</h2>
+      <p>Upload an inventory file to start a review.</p>
+    </div>
+
+    <div id="history-wrap" class="table-scroll" hidden>
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Records</th>
+            <th>Results</th>
+            <th>Reviewed</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="history"></tbody>
+      </table>
     </div>
   </section>
+
+  <section id="review-view" aria-labelledby="filename" hidden>
+    <div class="page-heading">
+      <div>
+        <h1 id="filename" tabindex="-1"></h1>
+        <p id="run-meta" class="muted small"></p>
+      </div>
+
+      <div class="actions">
+        <button id="review-rules" class="quiet" type="button">
+          View validation rules
+        </button>
+        <button id="download-open" type="button">
+          Download report
+        </button>
+      </div>
+    </div>
+
+    <div id="archived-review" class="archive-notice" hidden>
+      <p id="archived-message"></p>
+      <a href="/api/template" download>
+        Download inventory template
+      </a>
+    </div>
+
+    <p
+      id="results-loading"
+      class="muted small"
+      role="status"
+      hidden
+    >
+      Loading records…
+    </p>
+
+    <div id="review-content" hidden>
+      <div
+        id="summary"
+        class="summary"
+        aria-label="Results for the entire file"
+      ></div>
+
+      <p
+        id="inventory-error-count"
+        class="inventory-result"
+        role="status"
+      ></p>
+
+      <section
+        class="inventory-charts"
+        aria-labelledby="charts-title"
+      >
+        <div class="charts-heading">
+          <div>
+            <h2 id="charts-title">Inventory overview</h2>
+            <p id="charts-context" class="small muted"></p>
+          </div>
+
+          <label>
+            Chart scope
+            <select id="chart-scope">
+              <option value="all">Entire file</option>
+              <option value="filtered">
+                Current view · all pages
+              </option>
+            </select>
+          </label>
+        </div>
+
+        <p
+          id="charts-loading"
+          class="small muted"
+          role="status"
+          hidden
+        >
+          Loading charts…
+        </p>
+
+        <div id="charts-error" hidden>
+          <p
+            id="charts-error-message"
+            class="error-text"
+            role="alert"
+          ></p>
+          <button id="charts-retry" type="button">
+            Retry charts
+          </button>
+        </div>
+
+        <div id="charts-content" hidden>
+          <div id="primary-charts" class="chart-grid"></div>
+
+          <details id="more-charts" class="more-charts">
+            <summary>Explore more inventory fields</summary>
+
+            <div
+              class="comparison-controls"
+              style="align-items:flex-end"
+            >
+              <label>
+                Visualize
+                <select id="extra-chart-field"></select>
+              </label>
+
+              <button
+                id="add-chart-field"
+                type="button"
+                aria-controls="breakdown-chart-label nested-chart-fields"
+                aria-expanded="false"
+              >
+                + Add field
+              </button>
+
+              <label id="breakdown-chart-label" hidden>
+                Break down by
+                <select id="breakdown-chart-field">
+                  <option value="">Select another field</option>
+                </select>
+              </label>
+
+              <div id="nested-chart-fields"></div>
+
+              <button
+                id="remove-chart-field"
+                class="quiet"
+                type="button"
+                hidden
+              >
+                Remove field
+              </button>
+
+              <label id="comparison-category-label" hidden>
+                Category to inspect
+                <select id="comparison-category"></select>
+              </label>
+              <label id="comparison-values-label" hidden>
+                Percentage basis
+                <select id="comparison-values">
+                  <option value="row">Products in each row</option>
+                  <option value="portfolio">All products in the file</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="extra-chart" aria-live="polite"></div>
+          </details>
+        </div>
+      </section>
+
+      <section class="filters" aria-label="Filter records">
+        <label class="search-label">
+          Search
+          <input
+            id="search"
+            type="search"
+            placeholder="Name, ID or owner"
+            autocomplete="off"
+          >
+        </label>
+
+        <label>
+          Status
+          <select id="status">
+            <option value="all">All records</option>
+            <option value="Errors">Errors</option>
+            <option value="Passed">Passed</option>
+          </select>
+        </label>
+
+        <label>
+          Errors in field
+          <select id="field">
+            <option value="">All fields</option>
+          </select>
+        </label>
+
+        <button id="clear-filters" class="quiet" type="button">
+          Clear filters
+        </button>
+      </section>
+
+      <div class="table-scroll">
+        <table class="records-table">
+          <thead>
+            <tr>
+              <th>Record</th>
+              <th>Status</th>
+              <th>Error count</th>
+              <th>Affected fields</th>
+            </tr>
+          </thead>
+          <tbody id="records"></tbody>
+        </table>
+      </div>
+
+      <div id="no-results" class="empty-state" hidden>
+        <h2>No records in this view</h2>
+        <button id="show-all" type="button">
+          Show all records
+        </button>
+      </div>
+
+      <footer class="pagination">
+        <span id="record-count" role="status"></span>
+
+        <div>
+          <span id="page-info"></span>
+          <button
+            id="previous"
+            type="button"
+            aria-label="Previous page"
+          >←</button>
+          <button
+            id="next"
+            type="button"
+            aria-label="Next page"
+          >→</button>
+        </div>
+      </footer>
+    </div>
+  </section>
+
   <section id="record-view" aria-labelledby="record-title" hidden>
-    <button id="back-to-results" class="quiet back" type="button">← Back to results</button>
-    <div class="page-heading"><div><p id="record-file" class="muted small"></p><h1 id="record-title" tabindex="-1">Record details</h1><p id="record-meta" class="muted small"></p><div id="record-status" class="record-status" role="status"></div></div><button id="record-rules" class="quiet" type="button">View validation rules</button></div>
-    <p id="record-loading" class="muted" role="status" hidden>Loading record…</p>
-    <div id="record-error" hidden><p id="record-error-message" class="error-text" role="alert"></p><button id="record-retry" type="button">Retry</button></div>
+    <button
+      id="back-to-results"
+      class="quiet back"
+      type="button"
+    >
+      ← Back to results
+    </button>
+
+    <div class="page-heading">
+      <div>
+        <p id="record-file" class="muted small"></p>
+        <h1 id="record-title" tabindex="-1">Record details</h1>
+        <p id="record-meta" class="muted small"></p>
+        <div
+          id="record-status"
+          class="record-status"
+          role="status"
+        ></div>
+      </div>
+
+      <button id="record-rules" class="quiet" type="button">
+        View validation rules
+      </button>
+    </div>
+
+    <p id="record-loading" class="muted" role="status" hidden>
+      Loading record…
+    </p>
+
+    <div id="record-error" hidden>
+      <p
+        id="record-error-message"
+        class="error-text"
+        role="alert"
+      ></p>
+      <button id="record-retry" type="button">Retry</button>
+    </div>
+
     <div id="record-content" hidden>
-      <table class="source-table"><thead><tr><th scope="col">Inventory field</th><th scope="col">Submitted value</th><th scope="col">Validation</th></tr></thead><tbody id="source-values"></tbody></table>
-      <details id="not-checked" class="source-extras" hidden><summary id="not-checked-title"></summary><div id="not-checked-list"></div></details>
+      <table class="source-table">
+        <thead>
+          <tr>
+            <th scope="col">Inventory field</th>
+            <th scope="col">Submitted value</th>
+            <th scope="col">Validation</th>
+          </tr>
+        </thead>
+        <tbody id="source-values"></tbody>
+      </table>
+
+      <details id="not-checked" class="source-extras" hidden>
+        <summary id="not-checked-title"></summary>
+        <div id="not-checked-list"></div>
+      </details>
     </div>
   </section>
 </main>
-<dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-message">
-  <div class="dialog-heading"><h2 id="delete-title">Delete review?</h2><button class="icon-button" data-close="delete-dialog" type="button" aria-label="Close delete review">×</button></div>
+
+<dialog
+  id="delete-dialog"
+  aria-labelledby="delete-title"
+  aria-describedby="delete-message"
+>
+  <div class="dialog-heading">
+    <h2 id="delete-title">Delete review?</h2>
+    <button
+      class="icon-button"
+      data-close="delete-dialog"
+      type="button"
+      aria-label="Close delete review"
+    >×</button>
+  </div>
+
   <p id="delete-message"></p>
   <p class="small muted">This cannot be undone in the app.</p>
   <p id="delete-error" class="error-text" role="alert" hidden></p>
-  <div class="actions"><button id="delete-cancel" data-close="delete-dialog" type="button" autofocus>Cancel</button><button id="delete-confirm" class="danger" type="button">Delete review</button></div>
+
+  <div class="actions">
+    <button
+      id="delete-cancel"
+      data-close="delete-dialog"
+      type="button"
+      autofocus
+    >
+      Cancel
+    </button>
+    <button id="delete-confirm" class="danger" type="button">
+      Delete review
+    </button>
+  </div>
 </dialog>
+
 <dialog id="upload-dialog" aria-labelledby="upload-title">
-  <div class="dialog-heading"><h2 id="upload-title">Upload inventory file</h2><button class="icon-button" data-close="upload-dialog" type="button" aria-label="Close upload">×</button></div>
-  <p class="small muted">Upload a CSV using the inventory template or the Centene AI Inventory export. Use the complete column set for either format; column order can vary. Template files may also include Lifecycle, which is kept without validation. <a href="/api/template" download>Download template</a></p>
+  <div class="dialog-heading">
+    <h2 id="upload-title">Upload inventory file</h2>
+    <button
+      class="icon-button"
+      data-close="upload-dialog"
+      type="button"
+      aria-label="Close upload"
+    >×</button>
+  </div>
+
+  <p class="small muted">
+    Upload a CSV using the inventory template or the Centene AI
+    Inventory export. Use the complete column set for either format;
+    column order can vary. Template files may also include Lifecycle,
+    which is kept without validation.
+    <a href="/api/template" download>Download template</a>
+  </p>
+
   <form id="upload-form">
-    <label class="dropzone" for="file"><strong>Choose a CSV file</strong><span id="file-limits" class="muted small">CSV only · 10 MiB · 10,000 records</span><input id="file" type="file" accept=".csv" required></label>
+    <label class="dropzone" for="file">
+      <strong>Choose a CSV file</strong>
+      <span id="file-limits" class="muted small">
+        CSV only · 10 MiB · 10,000 records
+      </span>
+      <input id="file" type="file" accept=".csv" required>
+    </label>
+
     <p id="upload-error" class="error-text" role="alert" hidden></p>
     <div id="header-errors" hidden></div>
-    <button id="upload-submit" type="submit" class="primary wide">Validate file</button>
-    <p id="upload-progress" class="muted small" role="status" hidden>Checking columns and validating records…</p>
+
+    <button id="upload-submit" type="submit" class="primary wide">
+      Validate file
+    </button>
+
+    <p
+      id="upload-progress"
+      class="muted small"
+      role="status"
+      hidden
+    >
+      Checking columns and validating records…
+    </p>
   </form>
 </dialog>
-<dialog id="rules-dialog" class="rules-dialog" aria-labelledby="rules-title">
-  <div class="dialog-heading"><div><h2 id="rules-title">Validation rules</h2><p id="rules-meta" class="muted small"></p></div><button class="icon-button" data-close="rules-dialog" type="button" aria-label="Close validation rules">×</button></div>
-  <label>Inventory field<select id="rules-field"></select></label><div id="rules-list"></div>
+
+<dialog
+  id="rules-dialog"
+  class="rules-dialog"
+  aria-labelledby="rules-title"
+>
+  <div class="dialog-heading">
+    <div>
+      <h2 id="rules-title">Validation rules</h2>
+      <p id="rules-meta" class="muted small"></p>
+    </div>
+
+    <button
+      class="icon-button"
+      data-close="rules-dialog"
+      type="button"
+      aria-label="Close validation rules"
+    >×</button>
+  </div>
+
+  <label>
+    Inventory field
+    <select id="rules-field"></select>
+  </label>
+
+  <div id="rules-list"></div>
 </dialog>
+
 <dialog id="report-dialog" aria-labelledby="report-title">
-  <div class="dialog-heading"><h2 id="report-title">Download report</h2><button class="icon-button" data-close="report-dialog" type="button" aria-label="Close report options">×</button></div>
-  <label>Include<select id="report-scope"><option value="filtered">Current view</option><option value="all">Entire file</option></select></label>
-  <div class="report-links"><a id="errors-download" class="button primary" download>Errors report</a><a id="records-download" class="button" download>Records report</a></div><p class="small muted">CSV · Source columns and original values included</p>
+  <div class="dialog-heading">
+    <h2 id="report-title">Download report</h2>
+    <button
+      class="icon-button"
+      data-close="report-dialog"
+      type="button"
+      aria-label="Close report options"
+    >×</button>
+  </div>
+
+  <label>
+    Include
+    <select id="report-scope">
+      <option value="filtered">Current view</option>
+      <option value="all">Entire file</option>
+    </select>
+  </label>
+
+  <div class="report-links">
+    <a id="errors-download" class="button primary" download>
+      Errors report
+    </a>
+    <a id="records-download" class="button" download>
+      Records report
+    </a>
+  </div>
+
+  <p class="small muted">
+    CSV · Source columns and original values included
+  </p>
 </dialog>
 </body>
 </html>

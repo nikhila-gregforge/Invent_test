@@ -78,10 +78,6 @@ def emails_in_text(value):
     return tuple(dict.fromkeys(candidate for candidate in EMAIL_PATTERN.findall(unescape(value)) if valid_email(candidate)))
 
 
-def has_centene_email(value):
-    return any(address.rsplit('@',1)[1].casefold()=='centene.com' for address in emails_in_text(text(value)))
-
-
 def placeholder_text(value):
     value = re.sub(r'\s+',' ',text(value)).casefold()
     return value in config.PLACEHOLDERS or not any(ch.isalpha() for ch in value)
@@ -89,7 +85,7 @@ def placeholder_text(value):
 
 def value_hint(field):
     if field in OWNERS:
-        return 'Enter the owner’s name or a valid @centene.com email. Names, roles, notes and multiple contacts are accepted.'
+        return 'Enter the owner’s name or a valid email address from any domain. Names, roles, notes and multiple contacts are accepted.'
     if field == 'business_purpose':
         return 'Describe what the system does and who uses it. Example: Helps claims staff find approved internal guidance.'
     if field == 'system_name':
@@ -135,8 +131,8 @@ PEOPLE = OWNERS
 
 
 @rule('REQ-02','Identify the person',PEOPLE,
-      'Owners may be identified by name or Centene email. Missing-contact placeholders and values with no letters do not identify an owner.',
-      'Enter the owner’s name or a valid @centene.com email.')
+      'Owners may be identified by name or a valid email from any domain. Missing-contact placeholders and values with no letters do not identify an owner.',
+      'Enter the owner’s name or a valid email address from any domain.')
 def people(c):
     for f in PEOPLE:
         value = text(c.inputs.get(f))
@@ -145,13 +141,13 @@ def people(c):
 
 
 @rule('EMAIL-01','Correct the owner email',OWNERS,
-      'Owner names are accepted. When email text is supplied, include at least one valid email with the exact domain centene.com. Multiple addresses and surrounding text are accepted. Delivery, directory membership and identity matching are not checked.',
-      'Correct the owner email to a valid @centene.com address, or identify the owner by name.')
+      'Owner names are accepted. When email text is supplied, include at least one syntactically valid email address from any domain. Multiple addresses and surrounding text are accepted. Delivery, directory membership and identity matching are not checked.',
+      'Correct the owner email to a valid address from any domain, or identify the owner by name.')
 def owner_email(c):
     for f in OWNERS:
         value = text(c.inputs.get(f))
-        if '@' in unescape(value) and not has_centene_email(value):
-            yield [f], config.LABELS[f]+' contains email text but no valid @centene.com email address.'
+        if '@' in unescape(value) and not emails_in_text(value):
+            yield [f], config.LABELS[f]+' contains email text but no valid email address.'
 
 
 @rule('EMAIL-02','Correct the vendor email',['vendor_owner'],

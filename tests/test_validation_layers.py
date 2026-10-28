@@ -43,20 +43,25 @@ def test_valid_application_ids_and_documented_exceptions(value):
     'Primary: alex+claims@centene.com\nSecondary: taylor@centene.com',
     'mailto:alex@centene.com',
     'Contact alex@centene.com. Available Monday–Friday.',
+    'Alex <alex@mhplan.com> — primary; Taylor <taylor@example.org> — backup',
+    'Contact ALEX@MHPLAN.COM, ext. 1234.',
+    'alex@subdomain.centene.com', 'External contact <alex@example.com>',
+    'alex@notcentene.com', 'alex@centene.com.evil.example',
+    'Alex &lt;alex&#64;mhplan.com&gt;',
 ])
-def test_extract_centene_emails_from_descriptive_text(value):
+def test_extract_valid_emails_from_any_domain_in_descriptive_text(value):
     assert emails_in_text(value)
     assert not validate(Q6=value,Q7=value)[1]
 
 
 @pytest.mark.parametrize('value',[
     'Contact: alex@', 'Contact: alex@centene',
-    'alex@centene.com.evil.example', 'alex@notcentene.com',
     'wrong@alex@centene.com', 'alex@centene.com@evil.example',
     'alex..smith@centene.com', 'alex@centene..com',
-    'alex@subdomain.centene.com', 'External contact <alex@example.com>',
+    'alex@mhplan', 'alex@mhplan..com', 'alex..smith@mhplan.com',
+    'wrong@alex@mhplan.com', 'alex@mhplan.com@other.example',
 ])
-def test_email_extraction_does_not_accept_invalid_or_external_substrings(value):
+def test_email_extraction_does_not_accept_invalid_substrings(value):
     assert 'EMAIL-01' in rules(validate(Q6=value,Q7=value)[1])
 
 
@@ -146,7 +151,7 @@ def test_owner_names_and_vendor_email_are_independently_accepted():
     assert record['field_results']['technical_owner_email']=='No errors'
 
 
-@pytest.mark.parametrize('technical',['','???','Unknown','wrong@','wrong@external.example'])
+@pytest.mark.parametrize('technical',['','???','Unknown','wrong@','wrong@external..example'])
 def test_other_row_email_does_not_rescue_missing_placeholder_or_invalid_technical_owner(technical):
     record=snapshot([valid_row(Q7=technical)])['records'][0]
     assert 'technical_owner_email' in record['affected_fields']

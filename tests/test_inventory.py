@@ -183,7 +183,7 @@ def test_model_requirements(technology,llm,ml,error):
 def test_owner_emails_with_names_and_notes_are_accepted(value): assert not validate(Q6=value,Q7=value)[1]
 
 
-@pytest.mark.parametrize('value',['TBD','123','a@','owner@example.com'])
+@pytest.mark.parametrize('value',['TBD','123','a@','owner@example..com'])
 def test_invalid_owners(value): assert rules(validate(Q6=value)[1]) & {'REQ-02','EMAIL-01'}
 
 
@@ -280,7 +280,7 @@ def test_actionable_messages_and_shared_rule_catalogue():
         assert finding.fix and finding.message
         assert finding.requirement==by_id[finding.rule_id]['requirement']
     assert 'Describe what the system does' in next(f.fix for f in findings if f.fields==['business_purpose'])
-    assert '@centene.com' in next(f.fix for f in findings if f.rule_id=='REQ-01')
+    assert 'any domain' in next(f.fix for f in findings if f.rule_id=='REQ-01')
 
 
 def test_immutable_history_deduplication_and_original_upload(tmp_path,monkeypatch):

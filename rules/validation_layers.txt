@@ -72,12 +72,12 @@ Validation:
 
 
 - Required
-- Must be a valid Centene email address
-- Only one email address allowed
+- A name or a valid email address from any domain is accepted
+- Multiple contacts and surrounding notes are accepted
 
 Message:
 
-- Enter one valid Centene email address.
+- Enter the owner's name or a valid email address from any domain.
 
 
 
@@ -88,12 +88,12 @@ Validation:
 
 
 - Required
-- Must be a valid Centene email address
-- Only one email address allowed
+- A name or a valid email address from any domain is accepted
+- Multiple contacts and surrounding notes are accepted
 
 Message:
 
-- Enter one valid Centene email address.
+- Enter the owner's name or a valid email address from any domain.
 
 
 

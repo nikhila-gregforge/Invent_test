@@ -89,3 +89,63 @@ def test_analytics_endpoint_scopes_all_pages_and_matches_inventory_result_count(
     assert client.get(f'/api/runs/{identifier}/analytics?scope=invalid').status_code==400
     assert client.get(f'/api/runs/{identifier}/analytics?scope=filtered&field=invalid').status_code==400
     assert client.get('/api/runs/missing/analytics').status_code==404
+
+
+def test_nested_comparison_keeps_ancestor_membership_and_multiselect_denominators():
+    from inventory.analytics import comparison
+    from inventory.chart_actions import distributions as with_records
+    data=snapshot([
+        valid_row('1',Q20='High',Q18='Medicaid;Medicare;Medicaid'),
+        valid_row('2',Q20='High',Q18='Medicaid',Q16='Pilot',Q17=''),
+        valid_row('3',Q20='Low',Q18='Medicaid'),
+        valid_row('4',Q20='High',Q18='Commercial'),
+    ])
+    before=json.dumps(data,sort_keys=True)
+    path=[{'field':'risk_tier','value':'High'}]
+    result=comparison(data,data['records'],'lines_of_business','deployment_status',path)
+    groups={group['label']:group for group in result['groups']}
+    assert result['total_records']==3 and result['group_multi']
+    assert {label:group['count'] for label,group in groups.items()}=={'Medicaid':2,'Medicare':1,'Commercial':1}
+    assert buckets(groups['Medicaid']['chart'])['Active']['percent']==50
+    assert result['summary']['denominator']==3
+    assert buckets(result['summary'])['Active']['count']==2
+    assert sum(buckets(group['chart']).get('Active',{}).get('count',0) for group in groups.values())==3
+    deeper=comparison(data,data['records'],'deployment_status','human_oversight',groups['Medicaid']['chart']['path'])
+    active=next(group for group in deeper['groups'] if group['label']=='Active')['chart']
+    assert deeper['total_records']==2 and active['denominator']==1
+    records=with_records(data,data['records'])['underlying_records']
+    matching=[record['application_id'] for record in records if all(
+        item['value'] in record['categories'][item['field']] for item in active['path'])]
+    assert matching==['APP-1']
+    assert json.dumps(data,sort_keys=True)==before
+
+
+def test_comparison_includes_quality_groups_and_grouped_vendor_aliases():
+    from inventory.analytics import comparison
+    data=snapshot([valid_row('1',Q9='Vendor built',Q8='owner@vendor.com',Q18=''),
+                   valid_row('2',Q9='Platform not in category list',Q18='None;Commercial'),
+                   valid_row('3',Q9='',Q18='Unlisted business')])
+    result=comparison(data,data['records'],'ai_source_group','lines_of_business')
+    groups={group['label']:group['chart'] for group in result['groups']}
+    assert buckets(groups['Vendor AI'])['Missing']['count']==1
+    assert buckets(groups['Unclassified'])['Invalid']['count']==1
+    assert buckets(groups['Missing'])['Unclassified']['count']==1
+    assert {key: value['count'] for key,value in buckets(result['summary']).items()}=={'Missing':1,'Invalid':1,'Unclassified':1}
+
+
+def test_nested_comparison_endpoint_filters_before_drilling_and_rejects_bad_paths(tmp_path):
+    client_app=create_app(tmp_path); client=client_app.test_client()
+    identifier=stage(client_app.extensions['store'],csv_file([
+        valid_row('1',Q20='High',Q3=''),valid_row('2',Q20='High'),valid_row('3',Q20='Low',Q3='')]))
+    endpoint=f'/api/runs/{identifier}/analytics'
+    params={'scope':'filtered','status':'Errors','group_by':'deployment_status',
+            'breakdown_by':'human_oversight','path':json.dumps([{'field':'risk_tier','value':'High'}]),
+            'comparison_only':'1','size':1,'page':2}
+    response=client.get(endpoint,query_string=params)
+    assert response.status_code==200 and response.json['comparison']['total_records']==1
+    assert response.json['comparison']['summary']['denominator']==1
+    assert 'charts' not in response.json
+    for bad in ['null','{}','[1]','invalid',json.dumps([{'field':'risk_tier','value':'unsupported'}]),
+                json.dumps([{'field':'deployment_status','value':'Active'}])]:
+        assert client.get(endpoint,query_string={**params,'path':bad}).status_code==400
+    assert client.get(endpoint,query_string={'group_by':'risk_tier'}).status_code==400

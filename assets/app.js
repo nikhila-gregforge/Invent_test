@@ -43,11 +43,15 @@ function selectRun(id) {
   state.id = id; state.filters = defaults(); state.data = null; state.fields = []; state.returnKey = null; state.autoStatus = true;
   try {
     const saved = JSON.parse(sessionStorage.getItem('inventory-review-4'));
-    if (saved && saved.id === id) { state.filters = {...defaults(), ...saved.filters}; state.returnKey = saved.returnKey; state.autoStatus = false; }
+    if (saved && saved.id === id) {
+      for (const key of Object.keys(state.filters)) if (key in saved.filters) state.filters[key] = saved.filters[key];
+      state.returnKey = saved.returnKey; state.autoStatus = false;
+    }
   } catch { /* A new review still works without saved navigation. */ }
 }
 function showView(view) {
   state.view = view;
+  if (view !== 'review') resetCharts();
   for (const name of ['home','review','record']) $(name+'-view').hidden = name !== view;
   notice();
 }
@@ -198,7 +202,7 @@ function syncFilters() {
 }
 async function loadResults(focus = false) {
   const {sequence,signal} = beginRequest(); const id = state.id;
-  resetCharts();
+  if (!state.data || state.data.run.id !== id) resetCharts();
   $('review-content').hidden = !state.data || state.data.run.id !== id;
   notice(); state.data = null; $('review-rules').disabled = true; $('archived-review').hidden = true; $('run-meta').textContent = '';
   state.loading = true; $('results-loading').hidden = false; $('download-open').disabled = true;

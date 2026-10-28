@@ -38,6 +38,12 @@ Open **http://127.0.0.1:8501**. Waitress serves the app on localhost. Stop with 
 
 The example is synthetic and uses 2026 dates. Automated fixtures use an explicit validation date.
 
+The current real input is `AI Inventory data.csv` in the repository root, exported from the second tab (**AI Inventory data**, 173 records) of `~/Downloads/Krisp_data.xlsx` into the 23-column inventory template. The source workbook remains unchanged. The two CSVs from the earlier ZIP are excluded. The real input CSV and generated reports under `data/` are ignored by Git.
+
+## Leadership presentation
+
+The [PowerPoint](presentation/AI-Inventory-Product-Patterns.pptx) contains 21 slides with speaker notes, product-level evidence and discussion questions for a 20–30 minute review. Its supporting app screenshots are in [presentation/screenshots](presentation/screenshots/). Both the presentation and screenshots are included in this repository. Percentages use all 173 products; overlapping combinations are not additive.
+
 ## Required file format
 
 Use **these 23 template headers**, optionally adding **Lifecycle**. Lifecycle is preserved in record details and records reports without validation; its values may be blank or contain any text. Names, capitalization, spaces and punctuation must match. Column order may vary. No other extra columns, blank headers, duplicate headers, alternate names, or long Forms question headers are accepted in the template layout. The complete 25-column Centene export layout is also supported, preserving Lifecycle and User AIS as source data.
@@ -85,10 +91,10 @@ A failing record does not block valid records. Repeated application IDs flag the
 
 Every error supplies the submitted value, a plain-language problem, and **How to fix** guidance. Rule IDs and exact requirements are secondary details. **View validation rules** shows formats, examples and conditional requirements. The example choice catalogue is not an exhaustive allowlist. The executable catalogue in `inventory/validation.py` supplies the checks, field help and error reports.
 
-Rules version **5.3** follows `rules/validation_layers.txt`, with the confirmed allowances for owner names, multiple contacts and future go-live dates. The vendor-contact requirement applies when the source establishes vendor involvement. The retained checks include:
+Rules version **5.4** follows `rules/validation_layers.txt`, with the confirmed allowances for owner names, multiple contacts, any valid email domain and future go-live dates. The vendor-contact requirement applies when the source establishes vendor involvement. The retained checks include:
 
 - Required values and nonblank selections. System names, purposes, combined impact profiles and other text do not require special wording. Choices outside the examples are accepted. Other does not require a prefixed explanation.
-- Business and technical owners accept a name or a valid Centene email. When email text is supplied, it must contain a valid `@centene.com` address. Multiple contacts and notes are accepted. Missing-contact placeholders do not identify an owner. Vendor emails may use any domain. No directory or delivery check is performed.
+- Business and technical owners accept a name or a syntactically valid email from any domain, including `@mhplan.com`. When email text is supplied, it must contain at least one valid address. Multiple contacts and notes are accepted. Missing-contact placeholders do not identify an owner. Vendor emails also accept any domain. No directory or delivery check is performed.
 - Counts must be nonnegative whole numbers; explicit numeric counts with notes are accepted. ML, DL and Predictive Analytics require an ML/DL count of at least **1**. LLM, GenAI and Agentic AI require a numeric LLM count of at least **0**. Blank, Unknown and Not Applicable are accepted when the corresponding count is not required. Model names, ambiguous ranges and fractions are not numeric counts.
 - Active systems require a valid go-live date. Future go-live dates are accepted for every deployment status. Submission dates cannot be in the future. Dates accept `YYYY-MM-DD`, `M/D/YYYY` and `M/D/YY`.
 - Vendor-built, licensed, purchased and hybrid sources require a vendor contact. A platform name such as Copilot Studio, Other, Unknown or uncertain plans alone do not establish vendor involvement. Missing contacts flag Vendor Owner only; the source is the condition, not an erroneous field. In-house systems may leave Vendor Owner blank or Not Applicable.
@@ -103,7 +109,15 @@ The home page contains upload access and recent reviews, with a **Delete** butto
 
 Search covers system name, application ID and business owner. **Errors in field** selects records with an error involving that field. Click any record row to open read-only details with error fields first.
 
-All charts show **% of records** using all records in the selected chart scope as the denominator. Line of Business and other multi-select fields use bars; a record can appear in several categories, so their percentages may total more than 100%. Missing, invalid and unclassified records remain included in the denominator.
+The chart section preserves the supplied ZIP's layout. **Explore more inventory fields → Visualize → + Add field** adds a breakdown. Keep choosing **+ Add field** to add third and subsequent levels from the 15 supported categorical fields. For example, choose **Risk tier → AI source group → Deployment status → Line of business**, then expand a risk tier and source group to see the remaining breakdown. **Category to inspect** narrows the first level; **Remove field** removes the last level. Each field can appear once in a path.
+
+For **two or more fields**, the comparison uses one compact table. The last field supplies the columns; earlier fields form expandable row groups. For example, **Risk tier → AI source group → Deployment status** shows deployment categories across the top, with risk tiers that expand into source groups. The header, group labels and footer remain visible when scrolling. The rest of the page keeps the ZIP's original layout.
+
+Cells show **count and % of row** by default; **Unique records** is the row's denominator. **Percentage basis → All products in the file** instead divides each cell's distinct product count by the entire uploaded file, including when a category or error filter is selected. One source row represents one product. CSV downloads identify the percentage denominator explicitly. Clicking a count opens exactly those underlying records, including every ancestor category. The footer is calculated directly from source records, independently of row groups, so expanding rows does not inflate totals. Multi-select fields can place the same source record in several groups or categories: do not sum overlapping groups, parent and child rows, or multi-select columns. Missing, invalid and unclassified categories are included. **Category to inspect** narrows both the rows and footer to the selected category.
+
+**Download table (CSV)** exports the visible rows and distinct total, with group paths, levels, parent/final-group labels, counts and denominators. A row's **Chart** button opens its chart in a dialog, with **Download summary (CSV)**, **Download chart (PNG)** and **View underlying records**. PNGs use a light background, aligned values and the full category path. Ordinary single-field charts remain unchanged. The optional **AI source group** view combines the configured vendor source categories into Vendor AI while retaining original values.
+
+Deeper rows load when expanded; results are reused for the same review and scope. **Entire file** includes all records, while **Current filters** includes matching records across every table page. Individual charts use **% of records** within their displayed scope.
 
 The two CSV reports use the same selection as the table:
 
@@ -118,7 +132,7 @@ The two CSV reports use the same selection as the table:
 
 Deleting a review removes its snapshot and uploaded copy from the active database. This applies to current and archived reviews and cannot be undone in the app. Other reviews, the original file on your computer, and existing backup files are unaffected. Uploading the same file after deleting its review creates a new review.
 
-Rules version **5.3** uses the simplified checks described above. Upload the same file again to create a review under the new rules; earlier snapshots remain unchanged. Previously saved fixed-format reviews, including workbook reviews, retain their original snapshots and remain readable. New workbook uploads are rejected.
+Rules version **5.4** removes the Centene-only owner-email restriction. Upload the same file again to create a review under the new rules; earlier snapshots remain unchanged. Previously saved fixed-format reviews, including workbook reviews, retain their original snapshots and remain readable. New workbook uploads are rejected.
 
 Earlier `validation_runs` tables are preserved byte-for-byte at the snapshot/upload level during migration. Their history entries show **Upload again to review** and a notice explaining that a current-format upload is needed. They are never relabeled Passed, and old results are not mixed into current reports. Archived detail/report requests return the same re-upload notice. Legacy snapshots remain available in the database unless explicitly deleted.
 
@@ -142,7 +156,7 @@ For another port, use `PORT=8502 python app.py` on macOS/Linux, or `$env:PORT = 
 python -m pytest -q -s
 ```
 
-The default suite skips eight optional browser tests and one private input-reference check. Enable these separately as described below.
+The default suite skips nine optional browser tests and one private input-reference check. Enable browser tests separately as described below.
 
 Coverage includes CSV-only enforcement, rejected formats and renamed non-CSV content, strict/reordered headers, template consistency, missing/extra/blank/duplicate columns, per-record errors, permitted former advisory cases, names/emails, conditional rules and dependencies, CSV parsing, source preservation, concurrent uploads, history deduplication, archived reviews, review deletion, filtered reports, safe downloads and read-only record endpoints.
 
@@ -189,6 +203,7 @@ assets/
   style.css                Dark responsive interface
   app.js                   Navigation, review deletion, filtering and downloads
   charts.js                Inventory charts and record percentages
+  chart-actions.js         Chart downloads and underlying-record views
   centene-logo.jpg          Bundled Centene logo
 inventory/
   __init__.py              Fixed inventory columns, values and field guidance
@@ -198,6 +213,7 @@ inventory/
   storage.py               SQLite reviews and preserved historical snapshots
   exports.py               Shared filters and CSV reports
   analytics.py             Chart categories, counts and record percentages
+  chart_actions.py         Chart membership for underlying-record views
 rules/
   validation_layers.txt    Supplied validation requirements
 tests/

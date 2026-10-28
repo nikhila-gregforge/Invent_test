@@ -1,5 +1,6 @@
 """Read-only AI Inventory validation workspace. Run: python app.py"""
 import os
+import json
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
 from werkzeug.exceptions import HTTPException, Forbidden
@@ -8,7 +9,7 @@ from inventory.ingestion import ImportFailure, HeaderMismatch
 from inventory.storage import Store, ArchivedReview
 from inventory.exports import select_records, export_report, csv_bytes
 from inventory.validation import catalogue
-from inventory.analytics import distributions, inventory_error_count
+from inventory.chart_actions import distributions, inventory_error_count, comparison
 
 ROOT=Path(__file__).resolve().parent
 
@@ -91,7 +92,23 @@ def create_app(data_dir=None):
         scope=request.args.get('scope','all')
         if scope not in {'all','filtered'}: raise ValueError('Choose Entire file or Current view for charts.')
         records=snapshot['records'] if scope=='all' else select_records(snapshot,request.args)
-        return jsonify(scope=scope,**distributions(snapshot,records))
+        group_by=request.args.get('group_by','')
+        breakdown_by=request.args.get('breakdown_by','')
+        if group_by or breakdown_by or 'path' in request.args or request.args.get('comparison_only'):
+            if not group_by or not breakdown_by:
+                raise ValueError('Select a field and a different field to break it down by.')
+            try:
+                path=json.loads(request.args.get('path','[]'))
+            except (ValueError, TypeError):
+                raise ValueError('Choose a valid inventory category path.')
+            compared=comparison(snapshot,records,group_by,breakdown_by,path)
+            if request.args.get('comparison_only')=='1':
+                return jsonify(scope=scope,comparison=compared)
+        else:
+            compared=None
+        result=distributions(snapshot,records)
+        if compared is not None: result['comparison']=compared
+        return jsonify(scope=scope,**result)
 
     @app.get('/api/runs/<identifier>/records/<int:key>')
     def record(identifier,key):
