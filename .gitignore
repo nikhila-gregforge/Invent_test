@@ -2,8 +2,8 @@
 __pycache__/
 .pytest_cache/
 .DS_Store
-data/
 /AI Inventory data.csv
 *.sqlite3*
+!/data/*.sqlite3
 *.zip
 ~$*

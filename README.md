@@ -38,7 +38,7 @@ Open **http://127.0.0.1:8501**. Waitress serves the app on localhost. Stop with 
 
 The example is synthetic and uses 2026 dates. Automated fixtures use an explicit validation date.
 
-The current real input is `AI Inventory data.csv` in the repository root, exported from the second tab (**AI Inventory data**, 173 records) of `~/Downloads/Krisp_data.xlsx` into the 23-column inventory template. The source workbook remains unchanged. The two CSVs from the earlier ZIP are excluded. The real input CSV and generated reports under `data/` are ignored by Git.
+The current real input is `AI Inventory data.csv` in the repository root, exported from the second tab (**AI Inventory data**, 173 records) of `~/Downloads/Krisp_data.xlsx` into the 23-column inventory template. The source workbook remains unchanged. The two CSVs from the earlier ZIP are excluded. The standalone input CSV remains ignored by Git. Saved review databases, including their stored uploads, and historical database backups are included under `data/`.
 
 ## Leadership presentation
 
@@ -228,4 +228,4 @@ README.md                  Setup, workflow, tests and limitations
 .gitignore                 Local data and generated-file exclusions
 ```
 
-Local databases, private uploads, virtual environments and caches are excluded. The app loads no remote assets or fonts and sends no uploaded data to external services.
+The database snapshots in `data/` and the presentation files are included in this repository. The standalone input CSV, virtual environments, caches and temporary SQLite journal files are excluded. The app loads no remote assets or fonts and sends no uploaded data to external services.
