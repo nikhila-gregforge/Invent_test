@@ -467,90 +467,213 @@ def test_browser_charts_scopes_counts_and_export_layout(browser_app,app):
     expect(page.locator('#charts-context')).to_contain_text('Entire file · 3 application records')
 
 
-def test_browser_nested_charts_keep_paths_in_records_and_downloads(browser_app,app,tmp_path):
+def test_browser_five_level_drilldown_and_slide_export(browser_app,app,tmp_path):
+    from playwright.sync_api import expect
+    page,context,base,errors=browser_app
+    vendor={'Q9':'Licensed from third-party vendor (customized)','Q8':'Vendor contact'}
+    identifier=stage(app.extensions['store'],csv_file([
+        valid_row('1',Q20='High',Q18='Medicaid;Medicare'),
+        valid_row('2',Q20='High',Q18='Medicaid',Q16='Pilot',Q17='',Q21='No',**vendor),
+        valid_row('3',Q20='High',Q18='Medicare',**vendor),
+        valid_row('4',Q20='Low',Q18='Medicaid'),
+    ]))
+    page.goto(base+'/#run/'+identifier)
+    expect(page.locator('#charts-content')).to_be_visible()
+    page.locator('#more-charts > summary').click()
+    page.locator('#extra-chart-field').select_option('risk_tier')
+    for index,field in enumerate(['lines_of_business','deployment_status','human_oversight','ai_source_group'],2):
+        page.locator('#add-chart-field').click()
+        page.locator('#breakdown-chart-field' if index==2 else '#nested-chart-field-'+str(index)).select_option(field)
+        expect(page.locator('.analysis-level')).to_have_count(index)
+        if index==2:
+            page.get_by_role('button',name='Drill into Line of business: Medicare',exact=True).click()
+    board=page.locator('.analysis-board')
+    expect(board).to_have_attribute('data-levels','5')
+    expect(page.locator('#add-chart-field')).to_be_hidden()
+    expect(page.locator('#nested-chart-field-6')).to_have_count(0)
+    expect(board.locator('table')).to_have_count(5)
+    expect(board.locator('.analysis-level[data-level="3"] .analysis-level-context')).to_have_text('Within Medicare · 2 records')
+    expect(board.locator('.analysis-path-step').nth(1)).to_contain_text('Medicare')
+    page.get_by_role('button',name='Drill into AI source group: Vendor AI',exact=True).click()
+    source=board.locator('.analysis-level[data-level="5"]')
+    source.get_by_role('button',name='View 1 record for AI source group: Vendor AI',exact=True).click()
+    expect(page.locator('dialog[open] [role="status"]')).to_contain_text('1 matching records')
+    expect(page.locator('dialog[open] tbody')).to_contain_text('APP-3')
+    expect(page.locator('dialog[open] tbody')).not_to_contain_text('APP-1')
+    expect(page.locator('dialog[open] tbody')).not_to_contain_text('APP-2')
+    page.get_by_role('button',name='Close',exact=True).click()
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download data (CSV)').click()
+    rows=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    chosen=next(row for row in rows if row['Level']=='5' and row['Selected on path']=='Yes')
+    assert chosen['Category']=='Vendor AI' and chosen['Records']=='1'
+    assert chosen['Parent path']=='Risk tier: High / Line of business: Medicare / Deployment status: Active / Human oversight: Yes'
+    assert all(row['Percentage denominator']=='4' for row in rows)
+    assert float(chosen['Percent'])==25
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Export slide (PNG)').click()
+    image=tmp_path/'slide.png';downloaded.value.save_as(image)
+    raw=image.read_bytes()
+    assert raw.startswith(b'\x89PNG\r\n\x1a\n')
+    assert int.from_bytes(raw[16:20],'big')==1920 and int.from_bytes(raw[20:24],'big')==1080
+    assert len(raw)>25000
+    page.locator('#comparison-values').select_option('row')
+    medicare=board.locator('.analysis-level[data-level="2"] tr[data-category="Medicare"]')
+    expect(medicare.locator('td').last).to_have_text('66.7%')
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download data (CSV)').click()
+    rows=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    chosen=next(row for row in rows if row['Level']=='5' and row['Selected on path']=='Yes')
+    assert chosen['Percentage denominator']=='2' and float(chosen['Percent'])==50
+    page.get_by_role('button',name='Drill into Risk tier: Low',exact=True).click()
+    expect(board.locator('.analysis-level[data-level="2"] .analysis-level-context')).to_have_text('Within Low · 1 record')
+    expect(board.locator('.analysis-path-step').last).to_contain_text('Developed in-house')
+    board.locator('.analysis-level[data-level="5"]').get_by_role('button',name='View 1 record for AI source group: Developed in-house',exact=True).click()
+    expect(page.locator('dialog[open] tbody')).to_contain_text('APP-4')
+    page.get_by_role('button',name='Close',exact=True).click()
+    page.locator('#remove-chart-field').click()
+    expect(board.locator('.analysis-level')).to_have_count(4)
+    expect(page.locator('#add-chart-field')).to_be_visible()
+    page.set_viewport_size({'width':390,'height':844})
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+
+
+def test_browser_drilldown_pages_chart_context_and_filtered_denominators(browser_app,app,tmp_path):
+    from playwright.sync_api import expect
+    page,context,base,errors=browser_app
+    lobs=['Medicaid','Medicare','Marketplace','Commercial','Employer Groups','Pharmacy','None']
+    rows=[valid_row(str(index+1),Q18=lob) for index,lob in enumerate(lobs)]
+    rows.append(valid_row('8',Q18='Medicaid',Q9='Vendor built',Q8='Vendor contact',Q16='Pilot',Q17=''))
+    identifier=stage(app.extensions['store'],csv_file(rows))
+    requests=[];page.on('request',lambda req:requests.append(req.url))
+    page.goto(base+'/#run/'+identifier)
+    expect(page.locator('#charts-content')).to_be_visible()
+    page.locator('#more-charts > summary').click()
+    page.locator('#extra-chart-field').select_option('lines_of_business')
+    for index,field in enumerate(['ai_source_group','deployment_status','human_oversight','risk_tier'],2):
+        page.locator('#add-chart-field').click()
+        page.locator('#breakdown-chart-field' if index==2 else '#nested-chart-field-'+str(index)).select_option(field)
+        expect(page.locator('.analysis-level')).to_have_count(index)
+    board=page.locator('.analysis-board');level=board.locator('.analysis-level[data-level="1"]')
+    expect(level.locator('.analysis-pagination')).to_contain_text('1–3 of 7')
+    page.get_by_role('button',name='Next categories in Line of business',exact=True).click()
+    expect(level.locator('.analysis-pagination')).to_contain_text('4–6 of 7')
+    expect(level.locator('.analysis-axis')).to_contain_text('selection on page 1')
+    expect(board.locator('.analysis-path-step').first).to_contain_text('Medicaid')
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download data (CSV)').click()
+    exported=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    first=[row for row in exported if row['Level']=='1']
+    assert len(first)==7 and sum(row['Visible in PNG']=='Yes' for row in first)==3
+    assert next(row for row in first if row['Selected on path']=='Yes')['Visible in PNG']=='No'
+    page.get_by_role('button',name='View Line of business chart for all records',exact=True).click()
+    dialog=page.locator('.comparison-chart-dialog')
+    expect(dialog.locator('.chart-card')).to_have_attribute('data-chart','lines_of_business')
+    with page.expect_download() as downloaded:
+        dialog.get_by_role('button',name='Download summary (CSV)').click()
+    exported=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    assert len(exported)==7 and all(row['Denominator']=='8' for row in exported)
+    dialog.get_by_role('button',name='View underlying records').click()
+    page.locator('dialog[open]').last.locator('select').select_option('Medicaid')
+    expect(page.locator('dialog[open]').last.locator('[role="status"]')).to_contain_text('2 matching records')
+    page.locator('dialog[open]').last.locator('tbody a').first.click()
+    expect(page.locator('#record-content')).to_be_visible()
+    expect(page.locator('dialog[open]')).to_have_count(0)
+    page.locator('#back-to-results').click()
+    expect(board).to_be_visible()
+    expect(level.locator('.analysis-pagination')).to_contain_text('4–6 of 7')
+    assert len([url for url in requests if '/analytics?' in url])==1
+    page.locator('#search').fill('APP-1')
+    expect(page.locator('#record-count')).to_contain_text('of 1 records')
+    page.locator('#chart-scope').select_option('filtered')
+    expect(page.locator('#charts-context')).to_contain_text('1 application records')
+    expect(board.locator('.analysis-metrics > div').first.locator('strong')).to_have_text('1')
+    expect(board.locator('.analysis-level[data-level="1"] tr[data-category="Medicaid"] td').last).to_have_text('12.5%')
+    with page.expect_download() as downloaded:
+        page.get_by_role('button',name='Download data (CSV)').click()
+    exported=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    assert all(row['Percentage denominator']=='8' for row in exported)
+    page.locator('#search').fill('no-such-record')
+    expect(page.locator('#charts-context')).to_contain_text('0 application records')
+    expect(page.get_by_role('button',name='Export slide (PNG)')).to_be_disabled()
+    expect(board).to_contain_text('No matching records')
+
+
+def test_browser_comparison_shows_distinct_flagged_records_and_concentration(browser_app,app):
     from playwright.sync_api import expect
     page,context,base,errors=browser_app
     identifier=stage(app.extensions['store'],csv_file([
-        valid_row('1',Q20='High',Q18='Medicaid;Medicare'),
-        valid_row('2',Q20='High',Q18='Medicaid',Q16='Pilot',Q17=''),
-        valid_row('3',Q20='Low',Q18='Medicaid'),
-        valid_row('4',Q20='High',Q18='Commercial'),
+        valid_row('1',Q20='High',Q11='Invalid',Q12='Invalid',Q6='<b>Business owner</b>',Q7='=Technical owner'),
+        valid_row('2',Q20='High'),
+        valid_row('3',Q20='High',Q9='Vendor built',Q8='N/A'),
+        valid_row('4',Q20='Low',Q19='None;California'),
     ]))
-    requests=[]; page.on('request',lambda req:requests.append(req.url))
     page.goto(base+'/#run/'+identifier)
     expect(page.locator('#charts-content')).to_be_visible()
     page.locator('#more-charts > summary').click()
     page.locator('#extra-chart-field').select_option('risk_tier')
     page.locator('#add-chart-field').click()
-    page.locator('#breakdown-chart-field').select_option('lines_of_business')
-    table=page.locator('#extra-chart .comparison-table')
-    expect(table).to_be_visible()
-    expect(page.locator('#extra-chart .chart-bars')).to_have_count(0)
-    expect(table.locator('tfoot .comparison-total')).to_have_text('4')
-    page.locator('#add-chart-field').click()
-    page.locator('#nested-chart-field-3').select_option('deployment_status')
-    expect(table.locator('tbody tr')).to_have_count(2)
-    branch_route='**/analytics?*group_by=lines_of_business*'
-    page.route(branch_route,lambda route:route.fulfill(status=503,json={'error':'Temporary chart failure.'}))
-    page.get_by_role('button',name='Expand Risk tier: High',exact=True).click()
-    expect(table).to_contain_text('Temporary chart failure.')
-    page.unroute(branch_route)
-    table.get_by_role('button',name='Retry',exact=True).click()
-    expect(table.locator('tr[data-depth="1"]')).to_have_count(3)
-    expect(table.locator('tfoot .comparison-total')).to_have_text('4')
-    # Overlapping LOB groups have five memberships but only four source records.
-    page.locator('#add-chart-field').click()
-    page.locator('#nested-chart-field-4').select_option('human_oversight')
-    page.get_by_role('button',name='Expand Risk tier: High',exact=True).click()
-    page.get_by_role('button',name='Expand Risk tier: High / Line of business: Medicaid',exact=True).click()
-    expect(table.locator('tr[data-depth="2"]')).to_have_count(2)
-    active=table.locator('tr[data-depth="2"]').filter(has_text='Active')
-    active.locator('.comparison-value').click()
-    expect(page.locator('dialog[open] [role="status"]')).to_contain_text('1 matching records')
+    page.locator('#breakdown-chart-field').select_option('ai_source_group')
+    concentration=page.locator('.validation-concentration')
+    expect(concentration.locator('.validation-concentration-total strong')).to_have_text('3')
+    expect(concentration.locator('[data-group="counts"] strong')).to_have_text('1')
+    expect(concentration.locator('.validation-concentration-detail')).to_contain_text('4 finding instances')
+    first=page.locator('.analysis-level[data-level="1"] tr[data-category="High"]')
+    expect(first.locator('.analysis-count')).to_have_text('3')
+    expect(first.locator('.analysis-flagged-count')).to_have_text('2')
+    first.get_by_role('button',name='View 2 records with findings for Risk tier: High',exact=True).click()
+    expect(page.locator('dialog[open] [role="status"]')).to_contain_text('2 matching records')
     expect(page.locator('dialog[open] tbody')).to_contain_text('APP-1')
-    expect(page.locator('dialog[open] tbody')).not_to_contain_text('APP-3')
+    expect(page.locator('dialog[open] tbody')).to_contain_text('APP-3')
+    expect(page.locator('dialog[open] tbody')).not_to_contain_text('APP-2')
     page.get_by_role('button',name='Close',exact=True).click()
+    page.locator('#validation-scope').select_option('path')
+    expect(concentration.locator('.validation-concentration-scope')).to_have_text('Selected path · 2 records')
+    expect(concentration.locator('.validation-concentration-total strong')).to_have_text('1')
+    page.locator('#validation-grouping').select_option('rules')
+    expect(concentration.locator('[data-group="COUNT-01"] strong')).to_have_text('1')
+    page.locator('#validation-grouping').select_option('columns')
+    expect(concentration.locator('[data-group="llm_count"] strong')).to_have_text('1')
+    expect(concentration.locator('[data-group="ml_dl_count"] strong')).to_have_text('1')
     with page.expect_download() as downloaded:
-        page.get_by_role('button',name='Download table (CSV)').click()
+        page.get_by_role('button',name='Download data (CSV)').click()
     rows=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
-    assert rows[-1]['Row type']=='Distinct total' and rows[-1]['Unique records']=='4'
-    assert any(row['Row type']=='Final group' and row['Unique records']=='1' and
-               'Risk tier: High / Line of business: Medicaid / Deployment status: Active' in row['Group path'] for row in rows)
-    active.locator('.comparison-show-chart').click()
+    fields=[row for row in rows if row['Row type']=='Validation concentration']
+    assert len(fields)==2 and all(row['Records']=='1' for row in fields)
+    assert all(row['Concentration scope']=='Selected path' for row in fields)
+    assert all(row['Percentage denominator']=='4' for row in fields)
+    page.get_by_role('button',name='Review selected records',exact=True).click()
+    queue=page.locator('.correction-queue-dialog[open]')
+    expect(queue.locator('[role="status"]')).to_contain_text('2 matching records')
+    expect(queue.locator('.correction-queue-context')).to_contain_text('Risk tier: High / AI source group: Developed in-house')
+    expect(queue.locator('.correction-queue-baseline')).to_contain_text('File baseline: 4 records')
+    expect(queue.locator('tbody')).to_contain_text('<b>Business owner</b>')
+    expect(queue.locator('tbody b')).to_have_count(0)
+    expect(queue.locator('tbody')).to_contain_text('LLM Count')
+    expect(queue.locator('tbody')).to_contain_text('No current validation correction required.')
     with page.expect_download() as downloaded:
-        page.locator('.comparison-chart-dialog').get_by_role('button',name='Download chart (PNG)').click()
-    image=tmp_path/'chart.png'; downloaded.value.save_as(image)
-    assert image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
-    assert int.from_bytes(image.read_bytes()[16:20],'big')==2400
-    page.locator('.comparison-chart-dialog').get_by_role('button',name='View underlying records').click()
-    page.locator('dialog[open] tbody a').click()
-    expect(page.locator('#record-content')).to_be_visible()
-    expect(page.locator('dialog[open]')).to_have_count(0)
+        queue.get_by_role('button',name='Download selected records (CSV)',exact=True).click()
+    records=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    assert {row['Application / System ID'] for row in records}=={'APP-1','APP-2'}
+    assert all(row['Selected records']=='2' and row['File baseline records']=='4' for row in records)
+    assert all(row['Selected path']=='Risk tier: High / AI source group: Developed in-house' for row in records)
+    flagged=next(row for row in records if row['Application / System ID']=='APP-1')
+    assert flagged['Business Owner']=='<b>Business owner</b>' and flagged['Technical Owner']=="'=Technical owner"
+    assert set(flagged['AI Inventory columns'].split('; '))=={'LLM Count','ML/DL Models Count'}
+    assert flagged['Rule IDs']=='COUNT-01' and flagged['Required actions'].count('COUNT-01:')==2
+    assert 'Invalid' in flagged['Submitted values'] and flagged['Requirements']
+    queue.get_by_role('button',name='Close',exact=True).click()
+    page.locator('#validation-grouping').select_option('families')
+    concentration.locator('[data-group="counts"]').click()
+    queue=page.locator('.correction-queue-dialog[open]')
+    expect(queue.locator('[role="status"]')).to_contain_text('1 matching records')
+    expect(queue.locator('.correction-queue-context')).to_contain_text('Risk tier: High / AI source group: Developed in-house')
+    with page.expect_download() as downloaded:
+        queue.get_by_role('button',name='Download selected records (CSV)',exact=True).click()
+    records=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
+    assert len(records)==1 and records[0]['Application / System ID']=='APP-1'
+    assert records[0]['Selected records']=='1' and records[0]['Rule IDs']=='COUNT-01'
+    queue.get_by_role('link',name='Synthetic assistant 1',exact=True).click()
+    expect(page.locator('#source-values')).to_contain_text('How to fix:')
     page.locator('#back-to-results').click()
-    expect(table).to_be_visible()
-    page.set_viewport_size({'width':390,'height':844})
-    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-    page.locator('#remove-chart-field').click()
-    expect(page.locator('#nested-chart-field-4')).to_have_count(0)
-    expect(table.locator('tfoot .comparison-total')).to_have_text('4')
-    page.locator('#remove-chart-field').click()
-    expect(table.locator('.comparison-expand')).to_have_count(0)
-    # A selected category changes the footer's scope, not just the visible rows.
-    page.locator('#comparison-category').select_option('High')
-    expect(table.locator('tfoot .comparison-total')).to_have_text('3')
-    expect(table.locator('tfoot th')).to_have_text('Unique records in selected category')
-    assert len([url for url in requests if '/analytics?' in url and 'comparison_only' not in url])==1
-    page.locator('#comparison-values').select_option('portfolio')
-    expect(table.locator('tbody .comparison-percent').first).to_have_text('50%')
-    expect(page.locator('#extra-chart')).to_contain_text('Percentages use all 4 products in the file')
-    with page.expect_download() as downloaded:
-        page.get_by_role('button',name='Download table (CSV)').click()
-    rows=list(csv.DictReader(StringIO(open(downloaded.value.path(),encoding='utf-8-sig').read())))
-    assert all(row['Percentage denominator']=='4' for row in rows)
-    assert float(rows[0]['Medicaid | % of all products'])==50
-    page.locator('#search').fill('APP-1')
-    expect(page.locator('#record-count')).to_contain_text('of 1 records')
-    page.locator('#chart-scope').select_option('filtered')
-    expect(page.locator('#charts-context')).to_contain_text('1 application records')
-    expect(table.locator('tbody .comparison-percent').first).to_have_text('25%')
-    expect(table.locator('tfoot .comparison-total')).to_have_text('1')
+    expect(page.locator('.analysis-path')).to_contain_text('Developed in-house')

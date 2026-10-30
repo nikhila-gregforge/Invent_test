@@ -7,10 +7,12 @@
   <title>AI Inventory · Centene</title>
 
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/assets/style.css?v=product-percentages-1">
+  <link rel="stylesheet" href="/assets/style.css?v=correction-queue-1">
 
-<script src="/assets/charts.js?v=product-percentages-1" defer></script>
-<script src="/assets/chart-actions.js?v=product-percentages-1" defer></script>
+<script src="/assets/charts.js?v=correction-queue-1" defer></script>
+<script src="/assets/comparison.js?v=correction-queue-1" defer></script>
+<script src="/assets/comparison-export.js?v=correction-queue-1" defer></script>
+<script src="/assets/chart-actions.js?v=correction-queue-1" defer></script>
 <script src="/assets/app.js?v=product-percentages-1" defer></script>
 </head>
 
@@ -184,6 +186,7 @@
               >
                 + Add field
               </button>
+              <span class="comparison-limit">Up to 5 columns</span>
 
               <label id="breakdown-chart-label" hidden>
                 Break down by
@@ -203,15 +206,11 @@
                 Remove field
               </button>
 
-              <label id="comparison-category-label" hidden>
-                Category to inspect
-                <select id="comparison-category"></select>
-              </label>
               <label id="comparison-values-label" hidden>
                 Percentage basis
                 <select id="comparison-values">
-                  <option value="row">Products in each row</option>
-                  <option value="portfolio">All products in the file</option>
+                  <option value="portfolio">All records in the file</option>
+                  <option value="row">Records in the parent group</option>
                 </select>
               </label>
             </div>

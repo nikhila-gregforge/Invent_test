@@ -120,6 +120,24 @@ def test_nested_comparison_keeps_ancestor_membership_and_multiselect_denominator
     assert json.dumps(data,sort_keys=True)==before
 
 
+def test_analytics_includes_finding_metadata_for_record_concentration():
+    from inventory.chart_actions import distributions as with_records
+    data=snapshot([valid_row('1',Q11='Invalid',Q12='Invalid'),valid_row('2')])
+    before=json.dumps(data,sort_keys=True)
+    records=with_records(data,data['records'])['underlying_records']
+    assert len(records[0]['findings'])==2
+    assert {finding['rule_id'] for finding in records[0]['findings']}=={'COUNT-01'}
+    assert {field for finding in records[0]['findings'] for field in finding['fields']}=={'llm_count','ml_dl_count'}
+    assert all(set(finding)=={'rule_id','title','fields','message','fix','requirement','values'} for finding in records[0]['findings'])
+    assert records[0]['owners']=={field:data['records'][0]['cells'][field]
+                                 for field in ['business_owner_email','technical_owner_email','vendor_owner']}
+    for finding in records[0]['findings']:
+        assert finding['fix'] and finding['message'] and finding['requirement']
+        assert finding['values']=={field:data['records'][0]['cells'][field] for field in finding['fields']}
+    assert records[1]['findings']==[]
+    assert json.dumps(data,sort_keys=True)==before
+
+
 def test_comparison_includes_quality_groups_and_grouped_vendor_aliases():
     from inventory.analytics import comparison
     data=snapshot([valid_row('1',Q9='Vendor built',Q8='owner@vendor.com',Q18=''),

@@ -42,7 +42,9 @@ The current real input is `AI Inventory data.csv` in the repository root, export
 
 ## Leadership presentation
 
-The [PowerPoint](presentation/AI-Inventory-Product-Patterns.pptx) contains 21 slides with speaker notes, product-level evidence and discussion questions for a 20–30 minute review. Its supporting app screenshots are in [presentation/screenshots](presentation/screenshots/). Both the presentation and screenshots are included in this repository. Percentages use all 173 products; overlapping combinations are not additive.
+The [validation review](presentation/AI-Inventory-Validation-Review.pptx) contains 19 slides for a 20–30 minute discussion of current findings, source corrections and proposed checks. Each slide names the AI Inventory columns involved. Speaker notes include the evidence, source rows and discussion questions. Multi-column app images include validation concentration. Most authored slide text follows ASD-STE100 principles, with exact technical names and source quotations retained.
+
+The earlier [portfolio presentation](presentation/AI-Inventory-Product-Patterns.pptx) is preserved separately. Supporting app screenshots for both decks are in [presentation/screenshots](presentation/screenshots/). The validation review uses one source row as one record and all 173 records as its percentage denominator. Overlapping groups are not additive.
 
 ## Required file format
 
@@ -109,15 +111,21 @@ The home page contains upload access and recent reviews, with a **Delete** butto
 
 Search covers system name, application ID and business owner. **Errors in field** selects records with an error involving that field. Click any record row to open read-only details with error fields first.
 
-The chart section preserves the supplied ZIP's layout. **Explore more inventory fields → Visualize → + Add field** adds a breakdown. Keep choosing **+ Add field** to add third and subsequent levels from the 15 supported categorical fields. For example, choose **Risk tier → AI source group → Deployment status → Line of business**, then expand a risk tier and source group to see the remaining breakdown. **Category to inspect** narrows the first level; **Remove field** removes the last level. Each field can appear once in a path.
+**Explore more inventory fields → Visualize → + Add field** builds a drill-down with **two to five columns**, chosen from the supported categorical inventory fields. The Add field control stops at five. **Remove field** removes the last level.
 
-For **two or more fields**, the comparison uses one compact table. The last field supplies the columns; earlier fields form expandable row groups. For example, **Risk tier → AI source group → Deployment status** shows deployment categories across the top, with risk tiers that expand into source groups. The header, group labels and footer remain visible when scrolling. The rest of the page keeps the ZIP's original layout.
+The comparison is a **16:9 analysis canvas** with a chart and table at every selected level. Three columns appear side by side; four and five use two rows. For **LOB → AI source group → Deployment status**, select Medicaid in the first table, then Developed in-house in the second, to see deployment within that exact intersection. The highlighted category path connects the levels, and the headline reports how many distinct records match the complete path. All selected fields remain visible. Selecting a category updates the following levels; adding another field preserves the existing selections. **Reset path** returns to the largest category at each level.
 
-Cells show **count and % of row** by default; **Unique records** is the row's denominator. **Percentage basis → All products in the file** instead divides each cell's distinct product count by the entire uploaded file, including when a category or error filter is selected. One source row represents one product. CSV downloads identify the percentage denominator explicitly. Clicking a count opens exactly those underlying records, including every ancestor category. The footer is calculated directly from source records, independently of row groups, so expanding rows does not inflate totals. Multi-select fields can place the same source record in several groups or categories: do not sum overlapping groups, parent and child rows, or multi-select columns. Missing, invalid and unclassified categories are included. **Category to inspect** narrows both the rows and footer to the selected category.
+Charts show record counts, with an explicit count scale. Red segments show records with validation findings; teal segments show records with no findings. Each table has separate **Records** and **Flagged** counts. Tables use **% of all records in the file** by default. **Percentage basis → Records in the parent group** instead divides by the record count entering each level. The denominator is labeled in every panel and included in CSV downloads. One source row represents one record. Multi-select categories can overlap, so do not add category counts or successive levels. Missing, invalid and unclassified categories remain included. Record counts open their underlying records with every ancestor selection applied; flagged counts open only records with findings.
 
-**Download table (CSV)** exports the visible rows and distinct total, with group paths, levels, parent/final-group labels, counts and denominators. A row's **Chart** button opens its chart in a dialog, with **Download summary (CSV)**, **Download chart (PNG)** and **View underlying records**. PNGs use a light background, aligned values and the full category path. Ordinary single-field charts remain unchanged. The optional **AI source group** view combines the configured vendor source categories into Vendor AI while retaining original values.
+The **Validation concentration** panel counts distinct records with findings, separately from finding instances. Use **Concentration scope** to inspect the current analytics view or only the selected path. Use **Group findings by** to compare finding families, inventory columns or validation rules. A record counts once within each group, but groups can overlap. Column groups include all columns used by a finding, including those that trigger conditional checks. The panel shows up to seven groups, with all groups included in CSV. Group counts open the matching records. Filters and the concentration scope are printed in the canvas and PNG.
 
-Deeper rows load when expanded; results are reused for the same review and scope. **Entire file** includes all records, while **Current filters** includes matching records across every table page. Individual charts use **% of records** within their displayed scope.
+**Review selected records** opens a correction queue for the complete selected path. Category counts, flagged counts and concentration groups also open queues for their exact selection. Each queue shows the path, owners, responsible AI Inventory columns, submitted values, findings and fix instructions. It includes all saved findings on each selected record. **Download selected records (CSV)** exports every record in that queue, across all pages, with one CSV row per record. Repeated findings stay together on that row. The selection count and whole-file baseline are separate metadata; broader table filters do not replace the selected queue. Correct values in the source file and upload again to validate them.
+
+Each panel displays up to six categories in the three-column layout, or three categories in the denser four/five-column layout. Category paging keeps the canvas readable. A page indicator identifies the visible subset, and a chart notes if its selected category is on another page. **Chart** opens the full distribution for that level, with summary CSV, chart PNG and underlying-record access.
+
+**Export slide (PNG)** saves the complete canvas at **1920 × 1080**, ready for a widescreen PowerPoint slide. It includes the same path, tables, category pages, charts, validation concentration, scope and percentage basis shown on screen, with a light presentation background. The image explicitly labels the current category page; it does not silently crop a long hierarchy. **Download data (CSV)** includes every category for every level in the focused path, including categories on other pages, with parent paths, distinct record counts, flagged counts, percentage denominators and selection flags. Additional rows contain all validation-concentration groups and their scope. It exports the current drill-down rather than all possible category combinations.
+
+Drilling and category paging reuse the saved category memberships and finding metadata without additional network requests. **Entire file** includes all records; **Current filters** includes matching records across every record-table page. The overall percentage denominator continues to use the whole uploaded file. The surrounding review page and ordinary single-field charts retain their existing layout. The optional **AI source group** combines configured vendor source categories into Vendor AI while retaining original values.
 
 The two CSV reports use the same selection as the table:
 
@@ -156,7 +164,7 @@ For another port, use `PORT=8502 python app.py` on macOS/Linux, or `$env:PORT = 
 python -m pytest -q -s
 ```
 
-The default suite skips nine optional browser tests and one private input-reference check. Enable browser tests separately as described below.
+The default suite skips eleven optional browser tests and one private input-reference check. Enable browser tests separately as described below.
 
 Coverage includes CSV-only enforcement, rejected formats and renamed non-CSV content, strict/reordered headers, template consistency, missing/extra/blank/duplicate columns, per-record errors, permitted former advisory cases, names/emails, conditional rules and dependencies, CSV parsing, source preservation, concurrent uploads, history deduplication, archived reviews, review deletion, filtered reports, safe downloads and read-only record endpoints.
 
@@ -203,6 +211,8 @@ assets/
   style.css                Dark responsive interface
   app.js                   Navigation, review deletion, filtering and downloads
   charts.js                Inventory charts and record percentages
+  comparison.js            Linked drill-down tables and charts (up to five levels)
+  comparison-export.js     Widescreen PNG and complete category CSV exports
   chart-actions.js         Chart downloads and underlying-record views
   centene-logo.jpg          Bundled Centene logo
 inventory/

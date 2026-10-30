@@ -26,6 +26,17 @@ def distributions(snapshot, records):
             "application_id": record["application_id"],
             "source_row": record["source_row"],
             "status": record["status"],
+            "owners": {
+                field: record["cells"].get(field, "")
+                for field in ("business_owner_email", "technical_owner_email", "vendor_owner")
+            },
+            "findings": [
+                {
+                    **{field: issue[field] for field in ("rule_id", "title", "fields", "message", "fix", "requirement")},
+                    "values": {field: record["cells"].get(field, "") for field in issue["fields"]},
+                }
+                for issue in record["findings"]
+            ],
             "categories": {
                 definition["id"]: _categories(
                     prepared, definition

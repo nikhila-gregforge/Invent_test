@@ -70,188 +70,141 @@ const chartActions = (() => {
     );
   }
 
-  function showRecords(ctx, chart, group, category = '') {
+  function showRecords(ctx, chart, group, category = '', selection = {}) {
     const dialog = make('dialog');
-
-    dialog.style.width =
-      'min(1000px, calc(100vw - 32px))';
-
-    const title = make(
-      'h2',
-      chart.title + ' — underlying records'
-    );
-
+    dialog.className = 'correction-queue-dialog';
+    const title = make('h2', chart.title + ' — underlying records');
     title.id = 'chart-records-title';
-
-    dialog.setAttribute(
-      'aria-labelledby',
-      title.id
-    );
-
+    dialog.setAttribute('aria-labelledby', title.id);
     const close = make('button', 'Close');
     close.type = 'button';
+    close.addEventListener('click', () => dialog.close());
+    const heading = make('div');
+    heading.className = 'dialog-heading';
+    heading.append(title, close);
 
-    close.addEventListener(
-      'click',
-      () => dialog.close()
-    );
+    const fieldLabels = new Map(state.data.fields.map(field => [field.id, field.label]));
+    const fieldLabel = id => fieldLabels.get(id) || chartState.data.charts.find(chart => chart.id === id)?.title || id;
+    const valueText = value => Array.isArray(value) ? value.join('; ') : String(value ?? '');
+    const pathText = path => path.map(item => item.title + ': ' + item.value).join(' / ');
+    const selectedPath = () => {
+      const path = [...(selection.path || chart.path || [])];
+      if (select.value && !path.some(item => item.field === chart.id && item.value === select.value)) {
+        path.push({field: chart.id, title: fieldLabel(chart.id), value: select.value});
+      }
+      return pathText(path);
+    };
+    const scope = make('p');
+    scope.className = 'correction-queue-context';
+    const baseline = make('p', 'File baseline: ' + state.data.run.total + ' records. Analytics scope: ' + ctx.scope + '.');
+    baseline.className = 'correction-queue-baseline';
+    const help = make('p', 'Review all saved findings on these records. Correct the source file and upload again.');
+    help.className = 'correction-queue-help';
 
     const label = make('label', 'Category');
     const select = make('select');
-
-    const all = make(
-      'option',
-      'All records in this chart'
-    );
-
+    const all = make('option', selection.fixed ? 'All records in this selection' : 'All records in this chart');
     all.value = '';
     select.append(all);
-
-    const categories = [
-      ...new Set(
-        membership(ctx, chart, group).flatMap(
-          record => record.categories[chart.id]
-        )
-      )
-    ];
-
+    const categories = [...new Set(membership(ctx, chart, group).flatMap(record => record.categories[chart.id]))];
     for (const category of categories) {
-      const option = make('option', category);
-      option.value = category;
-      select.append(option);
+      const option = make('option', category); option.value = category; select.append(option);
     }
-
     select.value = category;
     label.append(select);
+    label.hidden = selection.fixed && categories.length <= 1;
 
     const count = make('p');
     count.setAttribute('role', 'status');
-
+    const download = make('button', 'Download selected records (CSV)');
+    download.type = 'button';
+    const filters = make('div');
+    filters.className = 'actions correction-queue-tools';
+    filters.append(label, download);
     const scroll = make('div');
     scroll.className = 'table-scroll';
-
     const table = make('table');
-    const head = make('thead');
-    const headings = make('tr');
-    const body = make('tbody');
-
-    for (const heading of [
-      'System',
-      'Application ID',
-      'Source row',
-      'Validation'
-    ]) {
-      headings.append(make('th', heading));
+    table.className = 'correction-queue-table';
+    const head = make('thead'), headings = make('tr'), body = make('tbody');
+    for (const text of ['Record', 'Owners', 'AI Inventory columns', 'Findings and submitted values', 'Required action']) {
+      const th = make('th', text); th.scope = 'col'; headings.append(th);
     }
-
-    head.append(headings);
-    table.append(head, body);
-    scroll.append(table);
-
-    const controls = make('div');
-    controls.className = 'actions';
-
-    const previous = make('button', 'Previous');
-    const next = make('button', 'Next');
-
-    previous.type = 'button';
-    next.type = 'button';
-
-    controls.append(previous, next);
-
+    head.append(headings); table.append(head, body); scroll.append(table);
+    const controls = make('div'); controls.className = 'actions';
+    const previous = make('button', 'Previous'), next = make('button', 'Next');
+    previous.type = next.type = 'button'; controls.append(previous, next);
     let page = 0;
-
+    const selectedRows = () => membership(ctx, chart, group, select.value);
+    const recordFields = record => [...new Set(record.findings.flatMap(finding => finding.fields))];
+    const submittedValues = record => {
+      const values = new Map();
+      for (const finding of record.findings) {
+        for (const field of finding.fields) values.set(field, finding.values?.[field]);
+      }
+      return [...values].map(([field, value]) => fieldLabel(field) + ': ' + (valueText(value) || '(blank)')).join('\n');
+    };
     function draw() {
-      const rows = membership(
-        ctx,
-        chart,
-        group,
-        select.value
-      );
-
-      const start = page * 25;
-
-      count.textContent =
-        rows.length + ' matching records · ' +
-        (rows.length ? start + 1 : 0) + '–' +
-        Math.min(start + 25, rows.length);
-
+      const rows = selectedRows(), start = page * 25;
+      scope.textContent = 'Selection: ' + (selection.label || chart.title) +
+        (selectedPath() ? '\nPath: ' + selectedPath() : '\nPath: all categories in this analytics scope');
+      count.textContent = rows.length + ' matching records · ' + (rows.length ? start + 1 : 0) + '–' + Math.min(start + 25, rows.length);
       body.replaceChildren();
-
       for (const record of rows.slice(start, start + 25)) {
         const row = make('tr');
         const cell = make('td');
-
-        const link = make(
-          'a',
-          record.name || '(Missing system name)'
-        );
-
-        link.href =
-          '#run/' + encodeURIComponent(ctx.run) +
-          '/record/' + record.key;
-
-        link.addEventListener(
-          'click',
-          () => {
-            dialog.close();
-            document.querySelectorAll('.comparison-chart-dialog[open]').forEach(chart => chart.close());
-          }
-        );
-
-        cell.append(link);
-
-        row.append(
-          cell,
-          make(
-            'td',
-            record.application_id || '(blank)'
-          ),
-          make('td', record.source_row),
-          make('td', record.status)
-        );
-
-        body.append(row);
+        const link = make('a', record.name || '(Missing system name)');
+        link.href = '#run/' + encodeURIComponent(ctx.run) + '/record/' + record.key;
+        link.addEventListener('click', () => {
+          dialog.close();
+          document.querySelectorAll('.comparison-chart-dialog[open]').forEach(chart => chart.close());
+        });
+        cell.append(link, make('p', (record.application_id || '(blank ID)') + ' · Source row ' + record.source_row), make('p', record.status));
+        const owners = make('td');
+        for (const field of ['business_owner_email', 'technical_owner_email', 'vendor_owner']) {
+          const value = valueText(record.owners?.[field]);
+          if (field === 'vendor_owner' && !value && !recordFields(record).includes(field)) continue;
+          const entry = make('p'); entry.append(make('strong', fieldLabel(field) + ': '), document.createTextNode(value || '(blank)')); owners.append(entry);
+        }
+        const columns = make('td', recordFields(record).map(fieldLabel).join('\n') || '—');
+        const findings = make('td'), actions = make('td');
+        for (const finding of record.findings) {
+          const detail = make('div');
+          detail.className = 'correction-queue-finding';
+          detail.append(make('strong', finding.rule_id + ' · ' + finding.title), make('p', finding.message));
+          const values = make('p', finding.fields.map(field => fieldLabel(field) + ': ' + (valueText(finding.values?.[field]) || '(blank)')).join('\n'));
+          values.className = 'correction-queue-values'; detail.append(values); findings.append(detail);
+          const action = make('div'); action.className = 'correction-queue-finding';
+          action.append(make('strong', finding.rule_id), make('p', finding.fix)); actions.append(action);
+        }
+        if (!record.findings.length) {
+          findings.append(make('p', 'No findings under the saved checks.'));
+          actions.append(make('p', 'No current validation correction required.'));
+        }
+        row.append(cell, owners, columns, findings, actions); body.append(row);
       }
-
-      previous.disabled = page === 0;
-      next.disabled = start + 25 >= rows.length;
+      previous.disabled = page === 0; next.disabled = start + 25 >= rows.length; download.disabled = !rows.length;
     }
-
-    select.addEventListener('change', () => {
-      page = 0;
-      draw();
+    download.addEventListener('click', () => {
+      const records = selectedRows(), stamp = new Date().toISOString();
+      const rows = [['Source file', 'Review ID', 'Selection', 'Selected path', 'Analytics scope', 'Filters', 'Selected records', 'File baseline records',
+        'Source row', 'AI System / Solution Name', 'Application / System ID', 'Validation', 'Business Owner', 'Technical Owner', 'Vendor Owner',
+        'AI Inventory columns', 'Rule IDs', 'Submitted values', 'Findings', 'Required actions', 'Requirements', 'Exported UTC']];
+      for (const record of records) rows.push([ctx.file, ctx.run, selection.label || chart.title, selectedPath(), ctx.scope, ctx.filters,
+        records.length, state.data.run.total, record.source_row, record.name, record.application_id, record.status,
+        ...['business_owner_email', 'technical_owner_email', 'vendor_owner'].map(field => valueText(record.owners?.[field])),
+        recordFields(record).map(fieldLabel).join('; '), [...new Set(record.findings.map(finding => finding.rule_id))].join('; '), submittedValues(record),
+        record.findings.map(finding => finding.rule_id + ': ' + finding.message).join('\n'),
+        record.findings.map(finding => finding.rule_id + ': ' + finding.fix).join('\n') || 'No current validation correction required.',
+        record.findings.map(finding => finding.rule_id + ': ' + finding.requirement).join('\n'), stamp]);
+      save(new Blob(['\ufeff' + rows.map(row => row.map(csvCell).join(',')).join('\r\n')], {type: 'text/csv;charset=utf-8'}),
+        'inventory-selected-records-' + stamp.replace(/[:.]/g, '-') + '.csv');
     });
-
-    previous.addEventListener('click', () => {
-      page--;
-      draw();
-    });
-
-    next.addEventListener('click', () => {
-      page++;
-      draw();
-    });
-
-    dialog.append(
-      close,
-      title,
-      make('p', ctx.scope),
-      label,
-      count,
-      scroll,
-      controls
-    );
-
-    dialog.addEventListener(
-      'close',
-      () => dialog.remove(),
-      {once: true}
-    );
-
-    document.body.append(dialog);
-    draw();
-    dialog.showModal();
+    select.addEventListener('change', () => { page = 0; draw(); });
+    previous.addEventListener('click', () => { page--; draw(); });
+    next.addEventListener('click', () => { page++; draw(); });
+    dialog.append(heading, scope, baseline, help, filters, count, scroll, controls);
+    dialog.addEventListener('close', () => dialog.remove(), {once: true});
+    document.body.append(dialog); draw(); dialog.showModal();
   }
 
   async function chartImage(charts, ctx, groups, stamp) {
@@ -322,7 +275,8 @@ const chartActions = (() => {
         commands.push(null);
         let top = rowTop + padding;
         top = text(groups[index]?.label || chartTitle(chart), left, top, innerWidth, 23, ink, true) + 7;
-        top = text(recordCount(chart.denominator) + ' · ' + (chart.path?.length ? '% within group' : '% of records'),
+        top = text(recordCount(chart.denominator) + ' · ' + (chart.percent_label || (chart.path?.length ? '% within group' : '% of records')) +
+          (chart.percentage_denominator != null ? ' (base: ' + chart.percentage_denominator + ' records)' : ''),
           left, top, innerWidth, 15, muted) + 24;
         const entries = chart.buckets.filter(bucket => bucket.count > 0);
         const donut = columns === 1 && chart.kind === 'pie' && !chart.multi && entries.length > 0;
@@ -476,7 +430,7 @@ const chartActions = (() => {
             bucket.label,
             bucket.count,
             bucket.percent,
-            chart.denominator,
+            chart.percentage_denominator ?? chart.denominator,
             chart.percent_label || '% of records',
             chart.multi
               ? 'Yes; percentages may exceed 100%'
@@ -529,33 +483,22 @@ const chartActions = (() => {
   };
 
   return {
+    downloadDrilldown(model) {
+      save(new Blob([comparisonExport.csv(model)], {type: 'text/csv;charset=utf-8'}),
+        'inventory-drilldown-' + model.stamp.replace(/[:.]/g, '-') + '.csv');
+    },
+    async downloadSlide(model) {
+      save(await comparisonExport.png(model),
+        'inventory-drilldown-' + model.levels.length + '-levels-' + model.stamp.replace(/[:.]/g, '-') + '.png');
+    },
     records(chart, category = '') {
       showRecords(context(), chart, undefined, category);
     },
-    exportTable(items, summary, columns, fields, selected, percentageBase = null) {
+    recordsByKeys(chart, keys, title, selection = {}) {
       const ctx = context();
-      const stamp = new Date().toISOString();
-      const rows = [[
-        'Source file', 'Review ID', 'Scope', 'Filters', 'Selected fields',
-        'Row type', 'Level', 'Group path', 'Unique records', 'Percentage denominator',
-        ...columns.flatMap(column => [column.label + ' | Count', column.label + ' | ' + (percentageBase?.label || '% of row')]),
-        'Counting note', 'Exported UTC',
-      ]];
-      for (const item of [...items, {chart: summary, level: 0, type: 'Distinct total'}]) {
-        rows.push([
-          ctx.file, ctx.run, selected ? ctx.scope + ' · selected category' : ctx.scope,
-          ctx.filters, fields.join(' → '), item.type, item.level,
-          (item.chart.path || []).map(part => part.title + ': ' + part.value).join(' / '),
-          item.chart.denominator, percentageBase?.total ?? item.chart.denominator,
-          ...comparisonBuckets({chart: item.chart}, columns).flatMap(bucket => [bucket.count,
-            percentageBase ? (percentageBase.total ? 100 * bucket.count / percentageBase.total : 0) : bucket.percent]),
-          'Unique records per row and category. Groups can overlap; children are subsets of parents. Do not sum rows or multi-select categories.',
-          stamp,
-        ]);
-      }
-      const csv = '\ufeff' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
-      save(new Blob([csv], {type: 'text/csv;charset=utf-8'}),
-        'inventory-comparison-' + stamp.replace(/[:.]/g, '-') + '.csv');
+      const selected = new Set(keys);
+      ctx.records = ctx.records.filter(record => selected.has(record.key));
+      showRecords(ctx, {...chart, title: title || chart.title}, undefined, '', {...selection, fixed: true, label: title || chart.title});
     },
   };
 })();
